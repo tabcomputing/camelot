@@ -127,13 +127,13 @@ module Camelot
         if wait
           select
           when @ready.receive then :fd
-          when stop.receive?  then :stop
-          when timeout(wait)  then :timeout
+          when stop.receive? then :stop
+          when timeout(wait) then :timeout
           end
         else
           select
           when @ready.receive then :fd
-          when stop.receive?  then :stop
+          when stop.receive? then :stop
           end
         end
       end

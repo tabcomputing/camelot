@@ -1,7 +1,6 @@
 require "./spec_helper"
 require "jargon"
 
-
 private def mcp
   schema = File.read(File.join(__DIR__, "..", "schemas", "commands.yaml"))
   Camelot::MCP.new(Jargon.cli("camelot", yaml: schema), IO::Memory.new, IO::Memory.new, IO::Memory.new)

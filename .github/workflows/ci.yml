@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Crystal
+        uses: crystal-lang/install-crystal@v1
+
+      - name: Install AT-SPI and GObject-Introspection development files
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libgirepository1.0-dev gir1.2-atspi-2.0 libatspi2.0-dev \
+            libglib2.0-dev libdbus-1-dev libgc-dev libpcre2-dev libyaml-dev zlib1g-dev
+
+      - name: Install shards and generate Atspi bindings
+        run: |
+          shards install
+          bin/gi-crystal
+
+      - name: Check formatting
+        run: crystal tool format --check src spec
+
+      - name: Run specs
+        run: crystal spec
+
+      - name: Build executable
+        run: crystal build src/cli.cr -o bin/camelot
+
+      - name: Smoke test CLI
+        run: |
+          bin/camelot --version
+          bin/camelot --help
+          bin/camelot tree --help
+          bin/camelot --completions bash > /dev/null
+          # No accessibility bus on a runner: the failure must be the clean one.
+          (bin/camelot apps 2>&1 || true) | tee /dev/stderr | grep -q "accessibility bus"
+          # The MCP server needs no bus to list its tools.
+          echo '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | bin/camelot mcp | grep -q '"name":"context"'
