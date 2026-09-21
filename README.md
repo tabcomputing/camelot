@@ -22,7 +22,22 @@ the same command definitions double as tool definitions for an AI.
   Debian/Ubuntu: `libatspi2.0-dev gir1.2-atspi-2.0 libgirepository1.0-dev`.
 - Crystal >= 1.21.
 
-## Building
+## Installing
+
+Packages for Arch, Debian/Ubuntu and Fedora are built from `pkg/`:
+
+```sh
+just pkg-arch && sudo pacman -U pkg/camelot-*.pkg.tar.zst
+just pkg-deb  && sudo apt install ./pkg/camelot_*.deb
+just pkg-rpm  && sudo dnf install pkg/camelot-*.x86_64.rpm
+```
+
+(`pkg-deb` and `pkg-rpm` build inside podman containers, so they work from
+any distro.) Each installs `camelot` plus bash/zsh/fish completions.
+`just test-install` installs the deb and rpm into fresh containers to
+check their runtime dependencies.
+
+## Building from source
 
 ```sh
 shards install    # fetches jargon and gi-crystal
@@ -181,7 +196,7 @@ Register it with Claude Code once (user scope, since it is about your
 desktop rather than any one project):
 
 ```sh
-claude mcp add --scope user camelot -- /path/to/camelot mcp
+claude mcp add --scope user camelot -- camelot mcp     # or: just mcp-add
 ```
 
 Then in any session: *"look at what I'm looking at"* → the agent calls

@@ -19,6 +19,7 @@ depends=(
 makedepends=(
   'crystal'
   'shards'
+  'git'               # shards fetches dependencies from GitHub
   'libgirepository'   # gi-crystal's generator reads the Atspi typelib
 )
 install=camelot.install

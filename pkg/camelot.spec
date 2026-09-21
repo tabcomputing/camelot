@@ -10,8 +10,8 @@ URL:            https://github.com/tabcomputing/camelot
 Source0:        %{name}-%{version}.tar.gz
 
 BuildRequires:  crystal
-BuildRequires:  shards
 BuildRequires:  gcc
+BuildRequires:  git
 BuildRequires:  redhat-rpm-config
 BuildRequires:  gobject-introspection-devel
 BuildRequires:  at-spi2-core-devel
