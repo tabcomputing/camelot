@@ -53,14 +53,14 @@ module Camelot
       end
     end
 
-    def count : Int32
-      expire
+    def count(now : Time = Time.local) : Int32
+      expire(now)
       @events.size
     end
 
     # Raw events newer than `since`, oldest first.
-    def since(since : Time) : Array(Events::Event)
-      expire
+    def since(since : Time, now : Time = Time.local) : Array(Events::Event)
+      expire(now)
       @events.select { |e| e.time >= since }
     end
 

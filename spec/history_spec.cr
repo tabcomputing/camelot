@@ -6,14 +6,15 @@ end
 
 describe Camelot::History do
   it "is bounded" do
-    h = Camelot::History.new(3)
+    h = Camelot::History.new(3, (365 * 100).days)
     5.times { |i| h.record(ev("window:activate", i)) }
     h.count.should eq 3
     h.total.should eq 5
   end
 
+  # Events in these specs carry fixed timestamps, so retention is disabled.
   it "folds a burst of edits on one widget into one entry" do
-    h = Camelot::History.new
+    h = Camelot::History.new(2000, (365 * 100).days)
     h.record(ev("window:activate", 0, role: "frame", name: "Doc", path: "0"))
     h.record(ev("object:state-changed:focused", 1, detail1: 1))
     h.record(ev("object:state-changed:focused", 1, detail1: 0, path: "0/9")) # focus lost: noise
@@ -37,12 +38,14 @@ describe Camelot::History do
     h.record(ev("window:activate", 0, name: "old"))
     h.record(ev("window:activate", 5, name: "mid"))
     h.record(ev("window:activate", 20, name: "new")) # 20s later: "old" and "mid" have aged out
-    h.count.should eq 1
-    h.since(Time.local(2026, 9, 21, 11, 0, 0)).map(&.name).should eq ["new"]
+    now = Time.local(2026, 9, 21, 12, 0, 21)
+    h.count(now).should eq 1
+    h.since(Time.local(2026, 9, 21, 11, 0, 0), now).map(&.name).should eq ["new"]
+    h.count(now + 1.minute).should eq 0 # idle time expires the rest
   end
 
   it "respects since and limit" do
-    h = Camelot::History.new
+    h = Camelot::History.new(2000, (365 * 100).days)
     10.times { |i| h.record(ev("window:activate", i, name: "W#{i}")) }
     h.recent(Time.local(2026, 9, 21, 12, 0, 5), 3).map(&.name).should eq %w[W7 W8 W9]
   end
