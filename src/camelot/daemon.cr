@@ -13,8 +13,9 @@ module Camelot
     getter started : Time
 
     def initialize(@cli : Jargon::CLI, @socket_path : String = Config.socket_path,
-                   history_size : Int32 = Config.current.history, @log : IO = STDERR)
-      @history = History.new(history_size)
+                   history_size : Int32 = Config.current.history, @log : IO = STDERR,
+                   @config : Config = Config.current)
+      @history = History.new(history_size, @config.retention)
       @started = Time.local
       @stop = Channel(Nil).new
     end
@@ -22,11 +23,15 @@ module Camelot
     def run : Nil
       A11y.init
       server = listen
-      @log.puts "camelot daemon: listening on #{@socket_path}, keeping #{@history.size} events"
+      @log.puts "camelot daemon: listening on #{@socket_path}, keeping #{@history.size} events for #{@history.retention.total_minutes.to_i}m" \
+                "#{@config.text ? "" : ", typed text not recorded"}"
+      enable_accessibility if @config.accessibility
 
       listener = Events::Listener.new do |ev|
         event = Events.capture(ev)
-        @history.record(event) unless Config.ignored?(event.app)
+        next if @config.ignored?(event.app)
+        event.text = nil unless @config.text
+        @history.record(event)
       end
       Events::DEFAULT_TYPES.each { |t| listener.register(t) }
 
@@ -38,6 +43,22 @@ module Camelot
       server.try &.close
       File.delete?(@socket_path)
       @log.puts "camelot daemon: stopped"
+    end
+
+    # Browsers and some toolkits only build their accessibility tree when
+    # toolkit accessibility was on at their startup. Turn it on (and say
+    # so); never turn it off, a screen reader may depend on it.
+    private def enable_accessibility : Nil
+      return unless gsettings = Process.find_executable("gsettings")
+      key = {"org.gnome.desktop.interface", "toolkit-accessibility"}
+      current = IO::Memory.new
+      status = Process.run(gsettings, ["get", *key], output: current, error: Process::Redirect::Close)
+      return unless status.success? # no such schema: not a GNOME-style desktop
+      return if current.to_s.strip == "true"
+      if Process.run(gsettings, ["set", *key, "true"], error: Process::Redirect::Close).success?
+        @log.puts "camelot daemon: turned on #{key[0]} #{key[1]} so browsers expose page content " \
+                  "(applies to apps started from now on; set `accessibility: false` in config to leave it alone)"
+      end
     end
 
     private def listen : UNIXServer

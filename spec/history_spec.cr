@@ -32,6 +32,15 @@ describe Camelot::History do
     entries[3].name.should eq "Title"
   end
 
+  it "expires events older than the retention window" do
+    h = Camelot::History.new(100, 10.seconds)
+    h.record(ev("window:activate", 0, name: "old"))
+    h.record(ev("window:activate", 5, name: "mid"))
+    h.record(ev("window:activate", 20, name: "new")) # 20s later: "old" and "mid" have aged out
+    h.count.should eq 1
+    h.since(Time.local(2026, 9, 21, 11, 0, 0)).map(&.name).should eq ["new"]
+  end
+
   it "respects since and limit" do
     h = Camelot::History.new
     10.times { |i| h.record(ev("window:activate", i, name: "W#{i}")) }
@@ -53,5 +62,15 @@ describe Camelot::Config do
     c = Camelot::Config.load("/nonexistent/config.yaml")
     c.ignore.should be_empty
     c.history.should eq 2000
+    c.retention.should eq 30.minutes
+    c.text.should be_true
+    c.accessibility.should be_true
+  end
+
+  it "parses durations with s/m/h/d suffixes" do
+    Camelot::Config.from_yaml("retention: 90s").retention.should eq 90.seconds
+    Camelot::Config.from_yaml("retention: 2h").retention.should eq 2.hours
+    Camelot::Config.from_yaml("retention: 45").retention.should eq 45.seconds
+    expect_raises(YAML::ParseException, /bad duration/) { Camelot::Config.from_yaml("retention: soon") }
   end
 end

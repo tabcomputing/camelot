@@ -3,16 +3,47 @@ require "yaml"
 module Camelot
   # User configuration, ~/.config/camelot/config.yaml:
   #
-  #   ignore:            # applications never snapshotted or recorded
+  #   ignore:              # applications never snapshotted or recorded
   #     - keepassxc
-  #     - "1Password*"   # case-insensitive globs
-  #   history: 2000      # events the daemon keeps
+  #     - "1Password*"     # case-insensitive globs
+  #   history: 2000        # most events the daemon keeps...
+  #   retention: 30m       # ...and for how long (s/m/h suffix, or seconds)
+  #   text: true           # record what was typed, not just that typing happened
+  #   accessibility: true  # daemon turns on toolkit accessibility at start
   #
   class Config
     include YAML::Serializable
 
     property ignore : Array(String) = [] of String
     property history : Int32 = 2000
+    @[YAML::Field(converter: Camelot::Config::Duration)]
+    property retention : Time::Span = 30.minutes
+    property text : Bool = true
+    property accessibility : Bool = true
+
+    # "30m", "2h", "90s" or a bare number of seconds.
+    module Duration
+      def self.from_yaml(ctx : YAML::ParseContext, node : YAML::Nodes::Node) : Time::Span
+        raw = String.new(ctx, node)
+        parse(raw) || raise YAML::ParseException.new("bad duration #{raw.inspect} (use e.g. 30m, 2h, 90s)", *node.location)
+      end
+
+      def self.to_yaml(value : Time::Span, yaml : YAML::Nodes::Builder)
+        yaml.scalar("#{value.total_seconds.to_i}s")
+      end
+
+      def self.parse(raw : String) : Time::Span?
+        if m = raw.strip.match(/\A(\d+)\s*([smhd]?)\z/)
+          n = m[1].to_i64
+          case m[2]
+          when "m" then n.minutes
+          when "h" then n.hours
+          when "d" then n.days
+          else          n.seconds
+          end
+        end
+      end
+    end
 
     def initialize
     end

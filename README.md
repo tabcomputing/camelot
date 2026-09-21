@@ -134,17 +134,20 @@ every window, which works for X11/XWayland applications.
 ### Browsers
 
 Firefox and Chromium only build their accessibility tree if accessibility
-was enabled when they started. On GNOME that is one persistent setting:
+was enabled when they started. On GNOME that is one persistent setting,
+which **the daemon turns on for you** at startup (and says so in its log;
+`accessibility: false` in config leaves it alone). Without the daemon:
 
 ```sh
 gsettings set org.gnome.desktop.interface toolkit-accessibility true
 ```
 
-then restart the browser. (This does *not* start a screen reader — only
-`screen-reader-enabled` does that.) Elsewhere, Chromium also honours
-`--force-renderer-accessibility`. With it on, `camelot tree firefox`
-shows the page itself: headings, paragraphs, links, form fields and their
-values, in reading order.
+Either way, restart the browser afterwards. This does *not* start a screen
+reader — only `screen-reader-enabled` does that — and camelot never turns
+it back off, since a screen reader may depend on it. Elsewhere, Chromium
+also honours `--force-renderer-accessibility`. With it on,
+`camelot tree firefox` shows the page itself: headings, paragraphs, links,
+form fields and their values, in reading order.
 
 ## Output shape
 
@@ -217,14 +220,19 @@ before. `CAMELOT_LOCAL=1` bypasses it. Details in [docs/daemon.md](docs/daemon.m
 `~/.config/camelot/config.yaml`:
 
 ```yaml
-ignore:            # case-insensitive globs on the application name
+ignore:              # case-insensitive globs on the application name
   - keepassxc
   - "1Password*"
-history: 2000      # events the daemon keeps
+history: 2000        # most events the daemon keeps...
+retention: 30m       # ...and for how long (s/m/h/d suffix, or seconds)
+text: true           # record what was typed, not just that typing happened
+accessibility: true  # daemon turns on toolkit accessibility at start (see Browsers)
 ```
 
 Ignored applications are reported as a redacted shell (role and name only)
-by every command, and the daemon records nothing from them.
+by every command, and the daemon records nothing from them. `text: false`
+keeps `recent` working (which widget, how many edits, over how long) but
+drops the "last …" snippet of what was typed.
 
 ## MCP
 
@@ -255,6 +263,14 @@ Password fields (AT-SPI role `password text`) are reported with
 `"redacted": true` and no `text` or `value`, regardless of `--max-text`,
 and keystrokes into them never enter the event stream or the daemon's
 history. Applications on the ignore list are redacted the same way.
+
+**What the daemon holds.** Its history is in memory only: at most
+`history` events, none older than `retention` (30 minutes by default),
+readable only through a socket private to your user, gone when it stops.
+It does include the text typed into ordinary fields — that is what makes
+`recent` useful — unless `text: false`. Note that AT-SPI already
+broadcasts these events to every process in your session; the daemon adds
+short retention, not access.
 Everything else the focused application exposes to assistive technology —
 terminal scrollback, document bodies, chat drafts — *is* captured, so treat
 `context` output as sensitive and point it only at an AI you trust with

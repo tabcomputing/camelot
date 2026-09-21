@@ -30,9 +30,11 @@ module Camelot
     end
 
     getter size : Int32
+    getter retention : Time::Span
     getter total : Int64 = 0
 
-    def initialize(@size : Int32 = 2000)
+    # Keeps at most `size` events and nothing older than `retention`.
+    def initialize(@size : Int32 = 2000, @retention : Time::Span = 30.minutes)
       @events = Deque(Events::Event).new
     end
 
@@ -40,14 +42,25 @@ module Camelot
       @events.push(event)
       @events.shift if @events.size > @size
       @total += 1
+      expire(event.time)
+    end
+
+    # Drop what has aged out, as of `now`.
+    def expire(now : Time = Time.local) : Nil
+      cutoff = now - @retention
+      while (oldest = @events.first?) && oldest.time < cutoff
+        @events.shift
+      end
     end
 
     def count : Int32
+      expire
       @events.size
     end
 
     # Raw events newer than `since`, oldest first.
     def since(since : Time) : Array(Events::Event)
+      expire
       @events.select { |e| e.time >= since }
     end
 
