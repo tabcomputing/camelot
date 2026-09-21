@@ -154,7 +154,7 @@ module Camelot
 
     def self.find_focused(root : Atspi::Accessible) : Atspi::Accessible?
       return root if focused?(root)
-      if safe(false) { root.is_collection }
+      if safe(false) { !collection?(root).nil? }
         # StateSet's array constructor is a GArray gi-crystal can't marshal;
         # build the set empty and add to it.
         focused = Atspi::StateSet.new
@@ -195,7 +195,7 @@ module Camelot
       candidates = [] of Atspi::Accessible
       applications.each do |app|
         windows(app).each do |w|
-          next unless safe(false) { w.is_component && w.component_iface.contains(x, y, Atspi::CoordType::Screen) }
+          next unless safe(false) { component?(w).try(&.contains(x, y, Atspi::CoordType::Screen)) }
           candidates << w
         end
       end
@@ -208,7 +208,7 @@ module Camelot
     private def self.descend_to_point(acc : Atspi::Accessible, x, y, coords) : Atspi::Accessible
       current = acc
       loop do
-        deeper = safe(nil) { current.is_component ? current.component_iface.accessible_at_point(x, y, coords) : nil }
+        deeper = safe(nil) { component?(current).try(&.accessible_at_point(x, y, coords)) }
         break if deeper.nil? || deeper == current
         current = deeper
       end
@@ -276,7 +276,7 @@ module Camelot
       secret = secret?(acc)
       text = secret ? nil : text_of(acc, opts.max_text)
       text = nil if text && text.content == name # labels: the name already says it
-      value = secret ? nil : safe(nil) { acc.is_value ? acc.value_iface.current_value : nil }
+      value = secret ? nil : safe(nil) { value?(acc).try(&.current_value) }
       actions = opts.actions ? actions_of(acc) : nil
       count = safe(0) { acc.child_count }
 
@@ -328,10 +328,11 @@ module Camelot
 
     def self.extents_of(acc : Atspi::Accessible) : Extents?
       safe(nil) do
-        next nil unless acc.is_component
+        c = component?(acc)
+        next nil unless c
         # Window-relative: on Wayland toolkits have no global position to
         # report, so screen coordinates come back as zeros.
-        r = acc.component_iface.extents(Atspi::CoordType::Window)
+        r = c.extents(Atspi::CoordType::Window)
         Extents.new(r.x, r.y, r.width, r.height)
       end
     end
@@ -345,8 +346,8 @@ module Camelot
     def self.text_of(acc : Atspi::Accessible, max : Int32) : TextInfo?
       return nil if max == 0
       safe(nil) do
-        next nil unless acc.is_text
-        t = acc.text_iface
+        t = text?(acc)
+        next nil unless t
         length = t.character_count
         next nil if length <= 0
         caret = t.caret_offset
@@ -364,13 +365,26 @@ module Camelot
 
     def self.actions_of(acc : Atspi::Accessible) : Array(String)?
       safe(nil) do
-        next nil unless acc.is_action
-        a = acc.action_iface
+        a = action?(acc)
+        next nil unless a
         (0...a.n_actions).map { |i| a.localized_name(i) }
       end
     end
 
     # ---- Helpers -------------------------------------------------------------
+
+    # Interface lookups that work across libatspi versions: the `is_*`
+    # predicates only exist from 2.5x on, while `get_*_iface` (NULL when the
+    # object lacks the interface) has always been there. The generated
+    # getters would hand that NULL to a wrapper constructor, so call the C
+    # functions directly.
+    {% for name, klass in {component: "AbstractComponent", text: "AbstractText", value: "AbstractValue",
+                           action: "AbstractAction", collection: "AbstractCollection"} %}
+      def self.{{name}}?(acc : Atspi::Accessible) : Atspi::{{klass.id}}?
+        ptr = LibAtspi.atspi_accessible_get_{{name}}_iface(acc.to_unsafe)
+        ptr.null? ? nil : Atspi::{{klass.id}}.new(ptr, GICrystal::Transfer::Full)
+      end
+    {% end %}
 
     # Hand-rolled `atspi_collection_get_matches`: it returns a GArray of
     # AtspiAccessible*, which gi-crystal does not know how to unpack.
