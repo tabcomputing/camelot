@@ -155,17 +155,7 @@ module Camelot
     def self.find_focused(root : Atspi::Accessible) : Atspi::Accessible?
       return root if focused?(root)
       if safe(false) { !collection?(root).nil? }
-        # StateSet's array constructor is a GArray gi-crystal can't marshal;
-        # build the set empty and add to it.
-        focused = Atspi::StateSet.new
-        focused.add(Atspi::StateType::Focused)
-        rule = Atspi::MatchRule.new(
-          focused, Atspi::CollectionMatchType::All,
-          nil, Atspi::CollectionMatchType::Invalid,
-          nil, Atspi::CollectionMatchType::Invalid,
-          nil, Atspi::CollectionMatchType::Invalid,
-          false)
-        hits = safe([] of Atspi::Accessible) { collection_matches(root, rule, 1) }
+        hits = safe([] of Atspi::Accessible) { collection_matches(root, focused_rule, 1) }
         return hits.first unless hits.empty?
       end
       dfs_focused(root)
@@ -385,6 +375,18 @@ module Camelot
         ptr.null? ? nil : Atspi::{{klass.id}}.new(ptr, GICrystal::Transfer::Full)
       end
     {% end %}
+
+    # "Any object in the FOCUSED state." Built with the C constructor: the
+    # StateSet array constructor is a GArray gi-crystal can't marshal, and
+    # older GIRs don't mark the unused rule arguments nullable.
+    def self.focused_rule : Atspi::MatchRule
+      states = Atspi::StateSet.new
+      states.add(Atspi::StateType::Focused)
+      invalid = Atspi::CollectionMatchType::Invalid.value
+      ptr = LibAtspi.atspi_match_rule_new(states.to_unsafe, Atspi::CollectionMatchType::All.value,
+        Pointer(Void).null, invalid, Pointer(UInt32).null, invalid, Pointer(Pointer(LibC::Char)).null, invalid, 0)
+      Atspi::MatchRule.new(ptr, GICrystal::Transfer::Full)
+    end
 
     # Hand-rolled `atspi_collection_get_matches`: it returns a GArray of
     # AtspiAccessible*, which gi-crystal does not know how to unpack.
