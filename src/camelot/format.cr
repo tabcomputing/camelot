@@ -1,5 +1,6 @@
 require "./a11y"
 require "./context"
+require "./events"
 
 module Camelot
   # Human-readable renderings. JSON and YAML come from the serializable
@@ -65,6 +66,25 @@ module Camelot
         s << " — " << n.description if n.description
         if acts = n.actions
           s << " {" << acts.join(", ") << "}" unless acts.empty?
+        end
+      end
+    end
+
+    # One event per line: time, type, app, widget, and the detail that matters.
+    def self.line(e : Events::Event) : String
+      String.build do |s|
+        s << e.time.to_s("%H:%M:%S.%L") << "  " << e.type.ljust(28) << "  "
+        s << e.app << ": " if e.app
+        s << (e.role || "?")
+        s << " " << e.name.inspect if e.name
+        case e.type
+        when .starts_with?("object:text-changed")
+          s << " @" << e.detail1 << " (" << e.detail2 << " chars)"
+          s << " " << e.text.inspect if e.text
+        when "object:text-caret-moved"
+          s << " caret " << e.detail1
+        when "object:state-changed:focused"
+          s << (e.detail1 == 1 ? " gained" : " lost")
         end
       end
     end

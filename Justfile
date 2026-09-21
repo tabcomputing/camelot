@@ -14,3 +14,8 @@ spec:
 
 run *ARGS:
     crystal run src/cli.cr -- {{ARGS}}
+
+# Release build installed where the MCP registration points.
+install:
+    shards build --release
+    cp bin/camelot ~/.local/bin/camelot

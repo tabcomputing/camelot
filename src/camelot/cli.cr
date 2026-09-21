@@ -3,6 +3,7 @@ require "./a11y"
 require "./context"
 require "./format"
 require "./mcp"
+require "./events"
 
 module Camelot
   # The camelot CLI, driven by Jargon. The subcommand schemas live in
@@ -51,6 +52,7 @@ module Camelot
       when "focus"   then cmd_focus
       when "at"      then cmd_at
       when "context" then cmd_context
+      when "watch"   then cmd_watch
       else                fail("unknown command: #{@result.subcommand}")
       end
     end
@@ -131,6 +133,40 @@ module Camelot
 
     private def cmd_context
       Format.emit(@out, Context.capture(int?("max-text") || 4000), @format)
+    end
+
+    private def cmd_watch
+      types = @result["events"]?.try(&.as_a?).try(&.map(&.as_s)) || Events::DEFAULT_TYPES
+      duration = int?("duration") || 0
+      stats_every = int?("stats") || 0
+      count = 0
+
+      listener = Events::Listener.new do |ev|
+        event = Events.capture(ev)
+        count += 1
+        case @format
+        when "json" then @out.puts event.to_json
+        when "yaml" then @out.puts event.to_yaml
+        else             @out.puts Format.line(event)
+        end
+        @out.flush
+      end
+      types.each { |t| listener.register(t) }
+
+      if stats_every > 0
+        # A plain Crystal fiber running alongside the GLib pump: the proof
+        # that the two loops coexist.
+        spawn do
+          loop do
+            sleep stats_every.seconds
+            STDERR.puts "camelot watch: #{count} events"
+          end
+        end
+      end
+
+      deadline = duration > 0 ? Time.instant + duration.seconds : nil
+      Events.pump { deadline.nil? || Time.instant < deadline }
+      listener.deregister_all
     end
 
     # ---- helpers --------------------------------------------------------------

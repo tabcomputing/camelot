@@ -9,8 +9,9 @@ module Camelot
   class MCP
     PROTOCOL_VERSION = "2025-06-18"
 
-    # Subcommands that are not tools.
-    EXCLUDED = %w[mcp]
+    # Subcommands that are not tools: the server itself, and the event
+    # stream (unbounded; a daemon-backed "recent events" tool is the fit).
+    EXCLUDED = %w[mcp watch]
 
     def initialize(@cli : Jargon::CLI, @input : IO = STDIN, @output : IO = STDOUT, @log : IO = STDERR)
     end

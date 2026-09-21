@@ -36,6 +36,14 @@ describe Camelot::Format do
     out.lines[3].should eq "focus: text [focused]"
   end
 
+  it "renders events one per line" do
+    t = Time.local(2026, 9, 21, 14, 52, 41, nanosecond: 421_000_000)
+    ev = Camelot::Events::Event.new(t, "object:text-changed:insert", "kgx", 1_u32, "terminal", "Terminal", "0/1", 3928, 3, "abc")
+    Camelot::Format.line(ev).should eq %(14:52:41.421  object:text-changed:insert    kgx: terminal "Terminal" @3928 (3 chars) "abc")
+    focus = Camelot::Events::Event.new(t, "object:state-changed:focused", "app", 1_u32, "entry", nil, "0", 1, 0, nil)
+    Camelot::Format.line(focus).should end_with "app: entry gained"
+  end
+
   it "emits json and yaml" do
     n = node("label", "Hi")
     String.build { |io| Camelot::Format.emit(io, n, "json") }.should contain %("role": "label")

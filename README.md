@@ -42,6 +42,7 @@ camelot context              # what the user is doing, packaged for an AI
 camelot focus                # the widget with keyboard focus (+ its text)
 camelot tree [APP]           # the widget tree of an app (default: active app)
 camelot at X Y               # the widget under a window-relative point
+camelot watch                # stream events: window switches, focus, typing
 camelot mcp                  # serve all of the above as MCP tools (stdio)
 ```
 
@@ -145,6 +146,26 @@ A snapshot node (`json`/`yaml`):
 one; `children` only when the node was expanded (`child_count` says whether
 there is more).
 
+### `watch`
+
+```
+$ camelot watch
+14:52:41.456  window:activate               pinentry-gtk: frame "pinentry-gtk2"
+14:52:41.459  object:state-changed:focused  pinentry-gtk: password text gained
+14:52:41.627  object:text-changed:insert    kgx: terminal "Terminal" @3875 (54 chars) "..."
+```
+
+Streams AT-SPI events as they happen (`-f json` for one JSON object per
+line). `-e type,type` picks the event types; the default set is window
+activation, focus changes, text edits, caret moves and document loads.
+`-t N` stops after N seconds; `--stats N` prints a count to stderr every N
+seconds. Text inserted into password fields is never reported.
+
+This is the seed of the daemon: libatspi delivers events through the GLib
+main context, which camelot drives from a Crystal fiber with non-blocking
+iterations (`Events.pump`) — no second thread, so Crystal's own fibers,
+IO and timers run alongside. Idle cost is about 1% CPU.
+
 ## MCP
 
 `camelot mcp` serves the commands above as [Model Context Protocol](https://modelcontextprotocol.io)
@@ -183,10 +204,16 @@ crystal spec        # unit specs; no accessibility bus needed
 just run context    # run from source
 ```
 
-Notes on the bindings: gi-crystal cannot marshal `GArray` returns, so
-`AtspiStateSet.get_states` is ignored in `binding.yml` (states are read with
-`contains`) and `atspi_collection_get_matches` is called by hand in
-`A11y.collection_matches`.
+Notes on the bindings — places where the generated gi-crystal code is
+bypassed on purpose:
+
+- `GArray` returns are not marshalled: `AtspiStateSet.get_states` is ignored
+  in `binding.yml` (states are read with `contains`) and
+  `atspi_collection_get_matches` is called by hand (`A11y.collection_matches`).
+- `Atspi::EventListener.new` builds each event with transfer FULL and frees
+  a struct libatspi still owns — a double free per event. `Events::Listener`
+  sets the C callback up itself with transfer NONE.
+- `Atspi::Event#any_data` does not compile; the GValue is read in place.
 
 ## License
 

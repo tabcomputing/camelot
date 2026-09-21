@@ -110,6 +110,26 @@ allOf:
         default: 4000
         description: Max characters of text kept around the caret (-1 = unlimited)
 ---
+name: watch
+description: "Stream accessibility events as they happen: window switches, focus changes, typing"
+allOf:
+  - {$ref: output}
+  - properties:
+      events:
+        type: array
+        items: {type: string}
+        short: e
+        description: "AT-SPI event types to subscribe to (default: window/focus/text events)"
+      duration:
+        type: integer
+        default: 0
+        short: t
+        description: Stop after this many seconds (0 = run until interrupted)
+      stats:
+        type: integer
+        default: 0
+        description: Print an event-count line to stderr every N seconds (0 = off)
+---
 name: mcp
 description: Serve the commands above as MCP tools over stdio (for Claude Code and other MCP clients)
 properties: {}
