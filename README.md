@@ -1,5 +1,8 @@
 # Camelot
 
+[![CI](https://github.com/tabcomputing/camelot/actions/workflows/ci.yml/badge.svg)](https://github.com/tabcomputing/camelot/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/tabcomputing/camelot)](https://github.com/tabcomputing/camelot/releases/latest)
+
 *A context bridge between the Linux desktop and an AI.*
 
 Camelot lets an AI see what you are doing on your desktop. It reads the
@@ -24,7 +27,9 @@ the same command definitions double as tool definitions for an AI.
 
 ## Installing
 
-Packages for Arch, Debian/Ubuntu and Fedora are built from `pkg/`:
+Arch, Debian/Ubuntu and Fedora packages are attached to each
+[release](https://github.com/tabcomputing/camelot/releases/latest).
+To build them yourself from `pkg/`:
 
 ```sh
 just pkg-arch && sudo pacman -U pkg/camelot-*.pkg.tar.zst
