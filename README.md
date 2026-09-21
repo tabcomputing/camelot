@@ -63,6 +63,9 @@ camelot focus                # the widget with keyboard focus (+ its text)
 camelot tree [APP]           # the widget tree of an app (default: active app)
 camelot at X Y               # the widget under a window-relative point
 camelot watch                # stream events: window switches, focus, typing
+camelot daemon               # background service: warm bus, activity history
+camelot recent               # what the user has been doing (needs the daemon)
+camelot status               # is the daemon up, what does it hold
 camelot mcp                  # serve all of the above as MCP tools (stdio)
 ```
 
@@ -190,6 +193,39 @@ run a non-blocking iteration. No polling, no second thread; Crystal's own
 fibers, IO and timers run alongside, and an idle pump costs ~0.2% CPU
 (libatspi's own periodic timeout, not ours).
 
+### `daemon`, `recent`, `status`
+
+The daemon keeps the bus connection warm and records window switches,
+focus changes and edits; `recent` digests them into what the user has been
+doing, with bursts of edits on one widget folded into a single line:
+
+```
+$ systemctl --user enable --now camelot     # or: camelot daemon
+$ camelot recent -s 120
+12:40:03  window  firefox: frame "Pull request #12 — Mozilla Firefox"
+12:40:03  focus   firefox: entry "Leave a comment"
+12:40:05  edit    firefox: entry "Leave a comment" ×41 over 12.3s last "looks right to me"
+12:40:21  window  gnome-text-editor: frame "notes.md - Text Editor"
+```
+
+While the daemon runs, every other command (and every MCP tool call) is
+answered by it, so caches stay warm; without it they run in-process as
+before. `CAMELOT_LOCAL=1` bypasses it. Details in [docs/daemon.md](docs/daemon.md).
+
+### Ignoring applications
+
+`~/.config/camelot/config.yaml`:
+
+```yaml
+ignore:            # case-insensitive globs on the application name
+  - keepassxc
+  - "1Password*"
+history: 2000      # events the daemon keeps
+```
+
+Ignored applications are reported as a redacted shell (role and name only)
+by every command, and the daemon records nothing from them.
+
 ## MCP
 
 `camelot mcp` serves the commands above as [Model Context Protocol](https://modelcontextprotocol.io)
@@ -205,7 +241,8 @@ claude mcp add --scope user camelot -- camelot mcp     # or: just mcp-add
 ```
 
 Then in any session: *"look at what I'm looking at"* → the agent calls
-`context`; *"what's in my editor?"* → `tree`; and so on. Tools default to
+`context`; *"what's in my editor?"* → `tree`; *"what was I just doing?"*
+→ `recent` (with the daemon running); and so on. Tools default to
 `text` output, which is the most token-efficient; pass `format: json` when
 the caller wants structure.
 
@@ -215,7 +252,9 @@ JSON-RPC 2.0, protocol version 2025-06-18, tools only.
 ## What is never captured
 
 Password fields (AT-SPI role `password text`) are reported with
-`"redacted": true` and no `text` or `value`, regardless of `--max-text`.
+`"redacted": true` and no `text` or `value`, regardless of `--max-text`,
+and keystrokes into them never enter the event stream or the daemon's
+history. Applications on the ignore list are redacted the same way.
 Everything else the focused application exposes to assistive technology —
 terminal scrollback, document bodies, chat drafts — *is* captured, so treat
 `context` output as sensitive and point it only at an AI you trust with

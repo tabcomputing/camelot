@@ -1,6 +1,7 @@
 require "./a11y"
 require "./context"
 require "./events"
+require "./history"
 
 module Camelot
   # Human-readable renderings. JSON and YAML come from the serializable
@@ -46,6 +47,37 @@ module Camelot
       else
         io.puts "focus: (none)"
       end
+    end
+
+    # Activity digest, one line per entry.
+    def self.text(io : IO, entries : Array(History::Entry)) : Nil
+      if entries.empty?
+        io.puts "(no activity)"
+        return
+      end
+      entries.each do |e|
+        io << e.time.to_s("%H:%M:%S") << "  "
+        widget = e.name ? "#{e.role} #{e.name.inspect}" : (e.role || "?")
+        case e.kind
+        when "window" then io << "window  " << e.app << ": " << widget
+        when "focus"  then io << "focus   " << e.app << ": " << widget
+        when "load"   then io << "loaded  " << e.app << ": " << widget
+        when "edit"
+          io << "edit    " << e.app << ": " << widget
+          io << " ×" << e.count if e.count > 1
+          if u = e.until
+            io << " over " << (u - e.time).total_seconds.round(1) << "s" if e.count > 1
+          end
+          io << " last " << e.text.inspect if e.text
+        end
+        io.puts
+      end
+    end
+
+    def self.text(io : IO, s : Daemon::Status) : Nil
+      io.puts "camelot daemon pid #{s.pid}, up #{s.uptime_seconds.to_i}s since #{s.started.to_s("%H:%M:%S")}"
+      io.puts "events: #{s.events} kept of #{s.total_events} seen (capacity #{s.capacity})"
+      io.puts "socket: #{s.socket}"
     end
 
     def self.text(io : IO, obj) : Nil

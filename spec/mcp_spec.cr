@@ -19,10 +19,10 @@ describe Camelot::MCP do
     r["result"]["serverInfo"]["name"].as_s.should eq "camelot"
   end
 
-  it "lists every command except mcp as a tool" do
+  it "lists every command except mcp, watch and daemon as a tool" do
     r = rpc(mcp, "tools/list")
     names = r["result"]["tools"].as_a.map(&.["name"].as_s)
-    names.sort.should eq %w[apps at context focus tree windows]
+    names.sort.should eq %w[apps at context focus recent status tree windows]
   end
 
   it "turns the Jargon schema into plain JSON Schema" do

@@ -1,5 +1,6 @@
 require "json"
 require "jargon"
+require "./commands"
 
 module Camelot
   # Model Context Protocol server over stdio (newline-delimited JSON-RPC 2.0).
@@ -9,9 +10,9 @@ module Camelot
   class MCP
     PROTOCOL_VERSION = "2025-06-18"
 
-    # Subcommands that are not tools: the server itself, and the event
-    # stream (unbounded; a daemon-backed "recent events" tool is the fit).
-    EXCLUDED = %w[mcp watch]
+    # Subcommands that are not tools: the server itself, the daemon, and
+    # the unbounded event stream (`recent` is its tool-shaped counterpart).
+    EXCLUDED = Commands::LOCAL_ONLY
 
     def initialize(@cli : Jargon::CLI, @input : IO = STDIN, @output : IO = STDOUT, @log : IO = STDERR)
     end
@@ -78,16 +79,10 @@ module Camelot
       end
     end
 
-    # Run a tool: parse the arguments through Jargon, dispatch, capture output.
+    # Run a tool through the shared command runner (which forwards to the
+    # daemon when one is running).
     def call(name : String, args : JSON::Any) : {String, Bool}
-      return {"unknown tool: #{name}", true} if EXCLUDED.includes?(name) || !@cli.subcommands.has_key?(name)
-      result = @cli.parse([name, "-"], IO::Memory.new(args.to_json))
-      return {result.errors.join("\n"), true} unless result.valid?
-      buffer = IO::Memory.new
-      CLI.new(result, buffer).dispatch
-      {buffer.to_s, false}
-    rescue ex : CLI::Error | A11y::Error
-      {ex.message || ex.class.name, true}
+      Commands.run(@cli, name, args)
     rescue ex
       @log.puts "camelot mcp: #{name}: #{ex.inspect_with_backtrace}"
       {"internal error: #{ex.message}", true}

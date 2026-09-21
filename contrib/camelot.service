@@ -1,0 +1,16 @@
+# systemd user unit: systemctl --user enable --now camelot
+[Unit]
+Description=camelot desktop context daemon
+Documentation=https://github.com/tabcomputing/camelot
+# The accessibility bus is part of the graphical session.
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/camelot daemon
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=graphical-session.target

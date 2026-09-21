@@ -41,7 +41,7 @@ module Camelot
         between = chain[(wi + 1)...fi] if wi && fi && fi > wi + 1
       end
       ancestors = between.map { |a| A11y.snapshot(a, brief) }
-      ancestors.reject! { |n| n.name.nil? && A11y::WRAPPER_ROLES.includes?(n.role) }
+      ancestors.reject! { |n| n.redacted || (n.name.nil? && A11y::WRAPPER_ROLES.includes?(n.role)) }
 
       new(
         app ? Application.new(A11y.safe("") { app.name }, A11y.safe(nil) { app.process_id }, A11y.safe(nil) { app.toolkit_name }) : nil,

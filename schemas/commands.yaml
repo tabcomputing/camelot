@@ -130,6 +130,40 @@ allOf:
         default: 0
         description: Print an event-count line to stderr every N seconds (0 = off)
 ---
+name: recent
+description: "What the user has been doing lately: window switches, focus changes, edits (needs the daemon)"
+allOf:
+  - {$ref: output}
+  - properties:
+      seconds:
+        type: integer
+        default: 60
+        short: s
+        description: How far back to look
+      limit:
+        type: integer
+        default: 50
+        short: n
+        description: Most recent entries to return
+      raw:
+        type: boolean
+        description: Every event as recorded, instead of the coalesced digest
+---
+name: status
+description: Is the daemon running, and what does it hold
+allOf:
+  - {$ref: output}
+---
+name: daemon
+description: Run the background service that keeps the bus warm and records activity for `recent`
+properties:
+  socket:
+    type: string
+    description: "Unix socket to listen on (default: $XDG_RUNTIME_DIR/camelot.sock)"
+  history:
+    type: integer
+    description: "Events to keep (default: config `history`, else 2000)"
+---
 name: mcp
 description: Serve the commands above as MCP tools over stdio (for Claude Code and other MCP clients)
 properties: {}

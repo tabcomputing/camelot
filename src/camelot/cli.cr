@@ -4,6 +4,8 @@ require "./context"
 require "./format"
 require "./mcp"
 require "./events"
+require "./daemon"
+require "./commands"
 
 module Camelot
   # The camelot CLI, driven by Jargon. The subcommand schemas live in
@@ -26,16 +28,33 @@ module Camelot
       end
       cli = build
       cli.run(argv) do |result|
-        if result.subcommand == "mcp"
+        case result.subcommand
+        when "mcp"
           MCP.new(cli).serve
-        else
+        when "daemon"
+          Daemon.new(cli,
+            result["socket"]?.try(&.as_s?) || Config.socket_path,
+            result["history"]?.try(&.as_i64?).try(&.to_i32) || Config.current.history).run
+        when "watch"
           new(result).dispatch
+        else
+          # A running daemon answers with warm caches and can answer
+          # `recent`/`status`; otherwise run here.
+          if answer = Client.call(result.subcommand.not_nil!, result.data)
+            output, is_error = answer
+            raise Error.new(output) if is_error
+            STDOUT.print output
+          elsif Commands::DAEMON_ONLY.includes?(result.subcommand)
+            raise Error.new("`#{result.subcommand}` needs the daemon: start it with `camelot daemon` (or `systemctl --user start camelot`)")
+          else
+            new(result).dispatch
+          end
         end
       end
     rescue ex : Error
       STDERR.puts "camelot: #{ex.message}"
       exit 1
-    rescue ex : A11y::Error
+    rescue ex : A11y::Error | Config::Error
       STDERR.puts "camelot: #{ex.message}"
       exit 2
     rescue ex : IO::Error

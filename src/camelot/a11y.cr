@@ -1,6 +1,7 @@
 require "json"
 require "yaml"
 require "gi-crystal"
+require "./config"
 
 GICrystal.require("Atspi", "2.0")
 
@@ -221,11 +222,23 @@ module Camelot
 
     def self.snapshot(acc : Atspi::Accessible, opts : Options = Options.new, path : String? = nil) : Node
       path ||= index_path(acc)
+      return redacted(acc, path) if ignored?(acc)
       node = build(acc, opts, path, opts.depth).not_nil!
       if opts.prune
         node.children = node.children.try { |kids| kids.flat_map { |k| prune(k) } }
       end
       node
+    end
+
+    # On the user's ignore list (by application name)?
+    def self.ignored?(acc : Atspi::Accessible) : Bool
+      Config.ignored?(safe(nil) { acc.application.name })
+    end
+
+    # Role and name only: what an ignored application looks like.
+    def self.redacted(acc : Atspi::Accessible, path : String) : Node
+      Node.new(safe("unknown") { acc.role_name }, blank_to_nil(safe("") { acc.name }), nil, path,
+        safe(nil) { acc.process_id }, [] of String, nil, nil, nil, nil, 0, nil, true)
     end
 
     # A wrapper with nothing to say is replaced by its (pruned) children.

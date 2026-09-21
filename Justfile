@@ -172,7 +172,7 @@ test-install-deb:
       apt-get install -y -qq /pkg/camelot_{{version}}-1_amd64.deb >/dev/null
       camelot --version
       (camelot apps 2>&1 || true) | grep -q "accessibility bus" && echo "apps: fails cleanly without a bus (ok)"
-      ls /usr/share/bash-completion/completions/camelot /usr/share/zsh/vendor-completions/_camelot /usr/share/fish/vendor_completions.d/camelot.fish
+      ls /usr/share/bash-completion/completions/camelot /usr/share/zsh/vendor-completions/_camelot /usr/share/fish/vendor_completions.d/camelot.fish /usr/lib/systemd/user/camelot.service
       echo "deb install: ok"'
 
 test-install-rpm:
@@ -183,7 +183,7 @@ test-install-rpm:
       dnf install -y -q /pkg/camelot-{{version}}-1.*.x86_64.rpm >/dev/null
       camelot --version
       (camelot apps 2>&1 || true) | grep -q "accessibility bus" && echo "apps: fails cleanly without a bus (ok)"
-      ls /usr/share/bash-completion/completions/camelot /usr/share/zsh/site-functions/_camelot /usr/share/fish/vendor_completions.d/camelot.fish
+      ls /usr/share/bash-completion/completions/camelot /usr/share/zsh/site-functions/_camelot /usr/share/fish/vendor_completions.d/camelot.fish /usr/lib/systemd/user/camelot.service
       echo "rpm install: ok"'
 
 test-install: test-install-deb test-install-rpm

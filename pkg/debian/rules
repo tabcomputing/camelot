@@ -14,6 +14,7 @@ override_dh_auto_install:
 	install -Dm644 completions.bash debian/camelot/usr/share/bash-completion/completions/camelot
 	install -Dm644 completions.zsh  debian/camelot/usr/share/zsh/vendor-completions/_camelot
 	install -Dm644 completions.fish debian/camelot/usr/share/fish/vendor_completions.d/camelot.fish
+	install -Dm644 contrib/camelot.service debian/camelot/usr/lib/systemd/user/camelot.service
 
 override_dh_auto_test:
 	true
