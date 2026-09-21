@@ -1,0 +1,6 @@
+camelot (0.1.0-1) unstable; urgency=medium
+
+  * Initial packaging: AT-SPI snapshots (apps, windows, tree, focus, at,
+    context), event stream (watch), MCP server (mcp), shell completions.
+
+ -- Thomas Sawyer <transfire@gmail.com>  Mon, 21 Sep 2026 16:00:00 +0000

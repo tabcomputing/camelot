@@ -1,0 +1,12 @@
+post_install() {
+  echo ""
+  echo "==> camelot reads the AT-SPI accessibility bus (running on any GNOME session)."
+  echo "==> Browsers only expose page content if accessibility was on when they started:"
+  echo "==>   gsettings set org.gnome.desktop.interface toolkit-accessibility true"
+  echo "==> Claude Code:  claude mcp add --scope user camelot -- camelot mcp"
+  echo ""
+}
+
+post_upgrade() {
+  post_install
+}

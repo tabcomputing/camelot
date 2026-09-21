@@ -1,0 +1,19 @@
+#!/usr/bin/make -f
+
+%:
+	dh $@
+
+override_dh_auto_build:
+	shards install --production
+	bin/gi-crystal
+	crystal build --release --no-debug src/cli.cr -o bin/camelot
+	for sh in bash zsh fish; do bin/camelot --completions $$sh > completions.$$sh; done
+
+override_dh_auto_install:
+	install -Dm755 bin/camelot debian/camelot/usr/bin/camelot
+	install -Dm644 completions.bash debian/camelot/usr/share/bash-completion/completions/camelot
+	install -Dm644 completions.zsh  debian/camelot/usr/share/zsh/vendor-completions/_camelot
+	install -Dm644 completions.fish debian/camelot/usr/share/fish/vendor_completions.d/camelot.fish
+
+override_dh_auto_test:
+	true

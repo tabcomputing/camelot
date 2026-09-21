@@ -4,3 +4,13 @@
 /.shards/
 *.dwarf
 /shard.override.yml
+/pkg/*.tar.gz
+/pkg/*.pkg.tar.zst
+/pkg/*.deb
+/pkg/*.rpm
+/pkg/*.buildinfo
+/pkg/*.changes
+/pkg/src/
+/pkg/pkg/
+/pkg/build/
+/pkg/rpmbuild/

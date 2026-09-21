@@ -1,0 +1,44 @@
+# Maintainer: trans <transfire@gmail.com>
+pkgname=camelot
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Context bridge between the Linux desktop and AI: AT-SPI snapshots, event stream, MCP tools"
+arch=('x86_64')
+url="https://github.com/tabcomputing/camelot"
+license=('MIT')
+depends=(
+  'at-spi2-core'
+  'glib2'
+  'dbus'
+  'gc'
+  'pcre2'
+  'libyaml'
+  'gcc-libs'
+  'zlib'
+)
+makedepends=(
+  'crystal'
+  'shards'
+  'libgirepository'   # gi-crystal's generator reads the Atspi typelib
+)
+install=camelot.install
+source=("${pkgname}-${pkgver}.tar.gz")
+sha256sums=('SKIP')
+
+build() {
+  cd "${pkgname}-${pkgver}"
+  shards install --production
+  bin/gi-crystal            # generate Atspi bindings from the system typelib
+  crystal build --release --no-debug src/cli.cr -o bin/camelot
+  for sh in bash zsh fish; do bin/camelot --completions $sh > "completions.$sh"; done
+}
+
+package() {
+  cd "${pkgname}-${pkgver}"
+  install -Dm755 bin/camelot "${pkgdir}/usr/bin/camelot"
+  install -Dm644 completions.bash "${pkgdir}/usr/share/bash-completion/completions/camelot"
+  install -Dm644 completions.zsh  "${pkgdir}/usr/share/zsh/site-functions/_camelot"
+  install -Dm644 completions.fish "${pkgdir}/usr/share/fish/vendor_completions.d/camelot.fish"
+  install -Dm644 README.md "${pkgdir}/usr/share/doc/${pkgname}/README.md"
+  install -Dm644 LICENSE "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+}

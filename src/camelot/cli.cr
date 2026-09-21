@@ -20,6 +20,10 @@ module Camelot
     end
 
     def self.main(argv = ARGV) : Nil
+      if argv == ["--version"] || argv == ["-V"]
+        puts "camelot #{VERSION}"
+        return
+      end
       cli = build
       cli.run(argv) do |result|
         if result.subcommand == "mcp"
