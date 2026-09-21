@@ -1,6 +1,8 @@
 prefix := env_var_or_default("PREFIX", "/usr/local")
 bindir := prefix / "bin"
 version := `sed -n 's/^version: //p' shard.yml`
+# Container runtime for the deb/rpm/arch-container builds (CI sets docker).
+container := env_var_or_default("CONTAINER", "podman")
 
 default:
     @just --list
@@ -104,11 +106,24 @@ pkg-src:
 pkg-arch: pkg-src
     cd pkg && makepkg -f
 
+# Arch package built in a container, for non-Arch hosts and CI.
+pkg-arch-container: pkg-src
+    #!/usr/bin/env bash
+    set -euo pipefail
+    {{container}} run --rm -v "$PWD/pkg:/pkg" docker.io/library/archlinux:base-devel bash -euo pipefail -c '
+      pacman -Syu --noconfirm --needed crystal shards git libgirepository gobject-introspection-runtime at-spi2-core glib2 dbus gc pcre2 libyaml gcc-libs zlib >/dev/null
+      useradd -m builder
+      rm -rf /build && mkdir /build && cp /pkg/camelot-{{version}}.tar.gz /pkg/PKGBUILD /pkg/camelot.install /build/
+      chown -R builder:builder /build
+      su builder -c "cd /build && makepkg -f --noconfirm" >/dev/null
+      cp /build/*.pkg.tar.zst /pkg/
+      chown "$(stat -c %u /pkg):$(stat -c %g /pkg)" /pkg/*.pkg.tar.zst'
+
 # Debian package, built in a Debian container with Crystal from crystal-lang.org's repo.
 pkg-deb: pkg-src
     #!/usr/bin/env bash
     set -euo pipefail
-    podman run --rm -v "$PWD/pkg:/pkg" docker.io/library/debian:stable bash -euo pipefail -c '
+    {{container}} run --rm -v "$PWD/pkg:/pkg" docker.io/library/debian:stable bash -euo pipefail -c '
       export DEBIAN_FRONTEND=noninteractive
       apt-get update -qq
       apt-get install -y -qq --no-install-recommends curl ca-certificates gnupg >/dev/null
@@ -125,7 +140,7 @@ pkg-deb: pkg-src
 pkg-rpm: pkg-src
     #!/usr/bin/env bash
     set -euo pipefail
-    podman run --rm -v "$PWD/pkg:/pkg" registry.fedoraproject.org/fedora:latest bash -euo pipefail -c '
+    {{container}} run --rm -v "$PWD/pkg:/pkg" registry.fedoraproject.org/fedora:latest bash -euo pipefail -c '
       dnf install -y -q curl >/dev/null
       curl -fsSL https://crystal-lang.org/install.sh | bash >/dev/null
       dnf install -y -q rpm-build gcc git redhat-rpm-config gobject-introspection-devel at-spi2-core-devel glib2-devel dbus-devel gc-devel pcre2-devel libyaml-devel zlib-devel >/dev/null
@@ -151,7 +166,7 @@ test-install-deb:
     #!/usr/bin/env bash
     set -euo pipefail
     ls pkg/camelot_*.deb >/dev/null 2>&1 || { echo "no .deb in pkg/ — run 'just pkg-deb' first"; exit 1; }
-    podman run --rm -v "$PWD/pkg:/pkg:ro" docker.io/library/debian:stable bash -euo pipefail -c '
+    {{container}} run --rm -v "$PWD/pkg:/pkg:ro" docker.io/library/debian:stable bash -euo pipefail -c '
       export DEBIAN_FRONTEND=noninteractive
       apt-get update -qq
       apt-get install -y -qq /pkg/camelot_{{version}}-1_amd64.deb >/dev/null
@@ -164,7 +179,7 @@ test-install-rpm:
     #!/usr/bin/env bash
     set -euo pipefail
     ls pkg/camelot-[0-9]*.x86_64.rpm >/dev/null 2>&1 || { echo "no .rpm in pkg/ — run 'just pkg-rpm' first"; exit 1; }
-    podman run --rm -v "$PWD/pkg:/pkg:ro" registry.fedoraproject.org/fedora:latest bash -euo pipefail -c '
+    {{container}} run --rm -v "$PWD/pkg:/pkg:ro" registry.fedoraproject.org/fedora:latest bash -euo pipefail -c '
       dnf install -y -q /pkg/camelot-{{version}}-1.*.x86_64.rpm >/dev/null
       camelot --version
       (camelot apps 2>&1 || true) | grep -q "accessibility bus" && echo "apps: fails cleanly without a bus (ok)"

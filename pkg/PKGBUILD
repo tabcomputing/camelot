@@ -20,8 +20,10 @@ makedepends=(
   'crystal'
   'shards'
   'git'               # shards fetches dependencies from GitHub
-  'libgirepository'   # gi-crystal's generator reads the Atspi typelib
+  'libgirepository'               # gi-crystal's generator reads typelibs...
+  'gobject-introspection-runtime' # ...including DBus-1.0, which Atspi depends on
 )
+options=('!debug')  # built with --no-debug; nothing to split out
 install=camelot.install
 source=("${pkgname}-${pkgver}.tar.gz")
 sha256sums=('SKIP')

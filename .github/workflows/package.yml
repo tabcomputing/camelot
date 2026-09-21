@@ -6,20 +6,33 @@ on:
   workflow_dispatch:
 
 jobs:
-  arch:
-    name: Arch Package
+  # Every package is built by the same `just pkg-*` recipe a developer runs
+  # locally, inside a container on the host runner (uploads from inside a
+  # `container:` job are refused for this repository).
+  build:
+    name: ${{ matrix.name }} Package
     runs-on: ubuntu-latest
-    container: archlinux:base-devel
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Arch
+            recipe: pkg-arch-container
+            artifact: camelot-arch
+            glob: "pkg/*.pkg.tar.zst"
+          - name: Debian
+            recipe: pkg-deb
+            artifact: camelot-deb
+            glob: "pkg/camelot_*.deb"
+          - name: Fedora
+            recipe: pkg-rpm
+            artifact: camelot-rpm
+            glob: "pkg/*.rpm"
     steps:
-      - name: Install git for checkout
-        run: pacman -Sy --noconfirm git
-
       - uses: actions/checkout@v5
 
-      - name: Install build dependencies
-        run: |
-          pacman -Syu --noconfirm --needed \
-            crystal shards libgirepository at-spi2-core glib2 dbus gc pcre2 libyaml gcc-libs zlib
+      - name: Install just
+        run: sudo apt-get update && sudo apt-get install -y just
 
       - name: Verify release version
         env:
@@ -31,120 +44,19 @@ jobs:
             exit 1
           fi
 
-      - name: Build Arch package with makepkg
-        run: |
-          version="$(sed -n 's/^version: //p' shard.yml)"
-          mkdir -p pkg
-          git config --global --add safe.directory "$GITHUB_WORKSPACE"
-          git -C "$GITHUB_WORKSPACE" ls-files -z | tar --null -T - \
-            --transform "s,^,camelot-${version}/," \
-            -czf "pkg/camelot-${version}.tar.gz"
-          useradd -m builder
-          chown -R builder:builder "$GITHUB_WORKSPACE"
-          su builder -c "cd '$GITHUB_WORKSPACE/pkg' && makepkg -f --noconfirm"
+      - name: Build ${{ matrix.name }} package
+        run: CONTAINER=docker just ${{ matrix.recipe }}
 
-      - name: Upload Arch artifact
+      - name: Upload artifact
         uses: actions/upload-artifact@v6
         with:
-          name: camelot-arch
-          path: pkg/*.pkg.tar.zst
-
-  deb:
-    name: Debian Package
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-
-      - name: Install Crystal and build dependencies
-        run: |
-          curl -fsSL https://crystal-lang.org/install.sh | sudo bash
-          sudo apt-get update
-          sudo apt-get install -y \
-            crystal build-essential git dpkg-dev debhelper \
-            libgirepository1.0-dev gir1.2-atspi-2.0 libatspi2.0-dev \
-            libglib2.0-dev libdbus-1-dev libgc-dev libpcre2-dev libyaml-dev zlib1g-dev
-
-      - name: Verify release version
-        env:
-          TAG_NAME: ${{ github.event.release.tag_name }}
-        run: |
-          version="$(sed -n 's/^version: //p' shard.yml)"
-          if [ "${{ github.event_name }}" = "release" ] && [ "$TAG_NAME" != "v$version" ]; then
-            echo "tag $TAG_NAME does not match shard.yml version v$version"
-            exit 1
-          fi
-
-      - name: Prepare Debian packaging
-        run: cp -a pkg/debian debian
-
-      - name: Build Debian package
-        run: dpkg-buildpackage -us -uc -b
-
-      - name: Collect Debian artifacts
-        run: |
-          mkdir -p dist
-          cp ../camelot_*.deb dist/
-          cp ../camelot_*.buildinfo dist/ 2>/dev/null || true
-          cp ../camelot_*.changes dist/ 2>/dev/null || true
-
-      - name: Upload Debian artifact
-        uses: actions/upload-artifact@v6
-        with:
-          name: camelot-deb
-          path: dist/*
-
-  fedora:
-    name: Fedora Package
-    runs-on: ubuntu-latest
-    container: fedora:latest
-    steps:
-      - name: Install git and curl for checkout and Crystal setup
-        run: dnf install -y curl git
-
-      - uses: actions/checkout@v5
-
-      - name: Install Crystal from the official repository
-        run: curl -fsSL https://crystal-lang.org/install.sh | bash
-
-      - name: Install RPM build dependencies
-        run: |
-          dnf install -y \
-            rpm-build gcc redhat-rpm-config \
-            gobject-introspection-devel at-spi2-core-devel glib2-devel dbus-devel \
-            gc-devel pcre2-devel libyaml-devel zlib-devel
-
-      - name: Verify release version
-        env:
-          TAG_NAME: ${{ github.event.release.tag_name }}
-        run: |
-          version="$(sed -n 's/^version: //p' shard.yml)"
-          if [ "${{ github.event_name }}" = "release" ] && [ "$TAG_NAME" != "v$version" ]; then
-            echo "tag $TAG_NAME does not match shard.yml version v$version"
-            exit 1
-          fi
-
-      - name: Build Fedora package
-        run: |
-          version="$(sed -n 's/^version: //p' shard.yml)"
-          mkdir -p dist pkg/rpmbuild/BUILD pkg/rpmbuild/BUILDROOT pkg/rpmbuild/RPMS pkg/rpmbuild/SOURCES pkg/rpmbuild/SPECS pkg/rpmbuild/SRPMS
-          git config --global --add safe.directory "$GITHUB_WORKSPACE"
-          git -C "$GITHUB_WORKSPACE" ls-files -z | tar --null -T - \
-            --transform "s,^,camelot-${version}/," \
-            -czf "pkg/rpmbuild/SOURCES/camelot-${version}.tar.gz"
-          cp pkg/camelot.spec pkg/rpmbuild/SPECS/
-          rpmbuild --define "_topdir $GITHUB_WORKSPACE/pkg/rpmbuild" -ba "$GITHUB_WORKSPACE/pkg/rpmbuild/SPECS/camelot.spec"
-          find pkg/rpmbuild/RPMS -name '*.rpm' -exec cp {} dist/ \;
-
-      - name: Upload Fedora artifact
-        uses: actions/upload-artifact@v6
-        with:
-          name: camelot-rpm
-          path: dist/*
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.glob }}
 
   release-assets:
     name: Upload Release Assets
     if: github.event_name == 'release'
-    needs: [arch, deb, fedora]
+    needs: [build]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -158,4 +70,4 @@ jobs:
           files: |
             camelot-arch/*.pkg.tar.zst
             camelot-deb/*.deb
-            camelot-rpm/*.rpm
+            camelot-rpm/*.x86_64.rpm
