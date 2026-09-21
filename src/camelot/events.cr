@@ -73,16 +73,96 @@ module Camelot
       end
     end
 
-    # Drive the GLib main context from the current fiber until the block
-    # returns false. Callbacks registered with libatspi run inside
-    # `iteration`; between bursts the fiber sleeps so other fibers run.
-    def self.pump(interval : Time::Span = 10.milliseconds, &keep_going : -> Bool) : Nil
-      context = GLib::MainContext.default
-      while keep_going.call
-        while context.iteration(false)
-        end
-        sleep interval
+    # Runs a GLib main context inside Crystal's event loop. GLib is asked
+    # what it would poll (`prepare` + `query`: fds and a timeout), Crystal
+    # waits for that — one fiber per fd parked in `wait_readable`, plus a
+    # timer — and then GLib runs its own non-blocking iteration to check and
+    # dispatch. An idle pump costs nothing; an event wakes it immediately.
+    # libatspi's context starts with two fds (the a11y bus socket and GLib's
+    # wakeup eventfd) and adds one per application it talks to.
+    class Pump
+      MAX_FDS = 64
+
+      @context : Pointer(Void)
+      @ready = Channel(Int32).new
+      @watched = {} of Int32 => IO::FileDescriptor
+
+      def initialize(context : GLib::MainContext = GLib::MainContext.default)
+        @context = context.to_unsafe
       end
+
+      # Run until `stop` yields, or `deadline` passes.
+      def run(deadline : Time::Instant? = nil, stop : Channel(Nil) = Channel(Nil).new) : Nil
+        raise Error.new("GLib main context is owned by another thread") if LibGLib.g_main_context_acquire(@context).zero?
+        fds = Slice(LibGLib::PollFD).new(MAX_FDS, LibGLib::PollFD.new)
+        loop do
+          break if deadline && Time.instant >= deadline
+
+          # Do whatever is ready right now.
+          while LibGLib.g_main_context_iteration(@context, 0) != 0
+          end
+
+          # Ask GLib what it would poll, and wait for that in Crystal.
+          priority = 0
+          LibGLib.g_main_context_prepare(@context, pointerof(priority))
+          timeout_ms = -1
+          count = LibGLib.g_main_context_query(@context, priority, pointerof(timeout_ms),
+            fds.to_unsafe.as(Pointer(Pointer(LibGLib::PollFD))), fds.size)
+          raise Error.new("GLib wants #{count} fds, more than #{MAX_FDS}") if count > fds.size
+          count.times { |i| watch(fds[i].fd) unless @watched.has_key?(fds[i].fd) }
+          next if timeout_ms == 0 # a source is already ready
+
+          wait = timeout_ms < 0 ? nil : timeout_ms.milliseconds
+          if deadline
+            left = deadline - Time.instant
+            wait = left if wait.nil? || left < wait
+          end
+          break if await(wait, stop) == :stop
+        end
+      ensure
+        LibGLib.g_main_context_release(@context)
+      end
+
+      private def await(wait : Time::Span?, stop : Channel(Nil)) : Symbol
+        if wait
+          select
+          when @ready.receive then :fd
+          when stop.receive?  then :stop
+          when timeout(wait)  then :timeout
+          end
+        else
+          select
+          when @ready.receive then :fd
+          when stop.receive?  then :stop
+          end
+        end
+      end
+
+      # A fiber that reports each time `fd` becomes readable. Readiness is
+      # level-triggered, but the pump drains the fd before this fiber runs
+      # again, so it does not spin.
+      private def watch(fd : Int32) : Nil
+        io = IO::FileDescriptor.new(handle: fd, close_on_finalize: false)
+        @watched[fd] = io
+        spawn(name: "glib-fd-#{fd}") do
+          loop do
+            begin
+              Crystal::EventLoop.current.wait_readable(io)
+            rescue IO::Error
+              break # fd closed under us: GLib will stop asking for it
+            end
+            @ready.send(fd)
+          end
+          @watched.delete(fd)
+        end
+      end
+    end
+
+    class Error < Exception; end
+
+    # Convenience: run the default context on the current fiber.
+    def self.pump(deadline : Time::Instant? = nil, stop : Channel(Nil) = Channel(Nil).new) : Nil
+      Pump.new.run(deadline, stop)
     end
 
     # The event's `any_data` GValue as a string, if it holds one. (The

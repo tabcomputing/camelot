@@ -164,8 +164,7 @@ module Camelot
         end
       end
 
-      deadline = duration > 0 ? Time.instant + duration.seconds : nil
-      Events.pump { deadline.nil? || Time.instant < deadline }
+      Events.pump(duration > 0 ? Time.instant + duration.seconds : nil)
       listener.deregister_all
     end
 

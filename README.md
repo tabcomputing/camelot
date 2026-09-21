@@ -161,10 +161,14 @@ activation, focus changes, text edits, caret moves and document loads.
 `-t N` stops after N seconds; `--stats N` prints a count to stderr every N
 seconds. Text inserted into password fields is never reported.
 
-This is the seed of the daemon: libatspi delivers events through the GLib
-main context, which camelot drives from a Crystal fiber with non-blocking
-iterations (`Events.pump`) — no second thread, so Crystal's own fibers,
-IO and timers run alongside. Idle cost is about 1% CPU.
+This is the seed of the daemon. libatspi delivers events through the GLib
+main context; `Events::Pump` runs that context inside Crystal's event
+loop the way GLib documents for foreign loops: ask GLib what it would poll
+(`g_main_context_prepare`/`query`), wait for exactly that in Crystal (a
+fiber parked in `wait_readable` per fd, plus GLib's timeout), then let GLib
+run a non-blocking iteration. No polling, no second thread; Crystal's own
+fibers, IO and timers run alongside, and an idle pump costs ~0.2% CPU
+(libatspi's own periodic timeout, not ours).
 
 ## MCP
 
