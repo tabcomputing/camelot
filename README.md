@@ -54,6 +54,7 @@ commands share a few knobs:
 | `--no-extents` | drop position/size |
 | `--all-states` | keep the noisy states (`enabled`, `visible`, `showing`...) |
 | `--raw` | keep anonymous layout containers instead of pruning them |
+| `--hidden` | include hidden widgets (collapsed menus, closed dialogs, background tabs) |
 | `-d`, `--depth N` | levels to descend (`tree`, `focus`) |
 
 ### `context`
@@ -104,6 +105,21 @@ Coordinates are relative to the active window's top-left (`--app NAME` to
 pick another app's window). On Wayland that is the only kind of coordinate a
 toolkit can answer; `--screen` uses absolute screen coordinates and searches
 every window, which works for X11/XWayland applications.
+
+### Browsers
+
+Firefox and Chromium only build their accessibility tree if accessibility
+was enabled when they started. On GNOME that is one persistent setting:
+
+```sh
+gsettings set org.gnome.desktop.interface toolkit-accessibility true
+```
+
+then restart the browser. (This does *not* start a screen reader — only
+`screen-reader-enabled` does that.) Elsewhere, Chromium also honours
+`--force-renderer-accessibility`. With it on, `camelot tree firefox`
+shows the page itself: headings, paragraphs, links, form fields and their
+values, in reading order.
 
 ## Output shape
 

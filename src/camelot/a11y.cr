@@ -71,14 +71,16 @@ module Camelot
     # Snapshot knobs. `depth` 0 means "this node only"; negative means unlimited.
     # `max_text` 0 skips text; negative means unlimited. `prune` splices out
     # anonymous layout containers (see `WRAPPER_ROLES`) so a tree reads as
-    # content rather than toolkit plumbing.
+    # content rather than toolkit plumbing. `hidden` keeps children that are
+    # not SHOWING (collapsed menus, off-screen popups, hidden tabs).
     record Options,
       depth : Int32 = 0,
       max_text : Int32 = 200,
       extents : Bool = true,
       actions : Bool = false,
       all_states : Bool = false,
-      prune : Bool = true
+      prune : Bool = true,
+      hidden : Bool = false
 
     # Roles that are pure layout when they carry no name, text or value.
     WRAPPER_ROLES = ["panel", "grouping", "filler", "section", "scroll pane", "viewport",
@@ -229,7 +231,7 @@ module Camelot
 
     def self.snapshot(acc : Atspi::Accessible, opts : Options = Options.new, path : String? = nil) : Node
       path ||= index_path(acc)
-      node = build(acc, opts, path, opts.depth)
+      node = build(acc, opts, path, opts.depth).not_nil!
       if opts.prune
         node.children = node.children.try { |kids| kids.flat_map { |k| prune(k) } }
       end
@@ -256,13 +258,21 @@ module Camelot
       node.child_count == 0 || !node.children.nil?
     end
 
-    private def self.build(acc : Atspi::Accessible, opts : Options, path : String, depth : Int32) : Node
+    # Returns nil for a non-root node that is hidden (unless `opts.hidden`).
+    private def self.build(acc : Atspi::Accessible, opts : Options, path : String, depth : Int32, root = true) : Node?
+      set = safe(nil) { acc.state_set }
+      extents = opts.extents ? extents_of(acc) : nil
+      unless root || opts.hidden
+        # Fetch extents only when needed to settle the question.
+        e = extents || (set && !set.contains(Atspi::StateType::Showing) ? extents_of(acc) : nil)
+        return nil if hidden?(set, e)
+      end
+
       role = safe("unknown") { acc.role_name }
       name = blank_to_nil(safe("") { acc.name })
       description = blank_to_nil(safe("") { acc.description })
       pid = safe(nil) { acc.process_id }
-      states = state_names(acc, opts.all_states)
-      extents = opts.extents ? extents_of(acc) : nil
+      states = state_names(set, opts.all_states)
       secret = secret?(acc)
       text = secret ? nil : text_of(acc, opts.max_text)
       text = nil if text && text.content == name # labels: the name already says it
@@ -272,12 +282,26 @@ module Camelot
 
       kids = nil
       if depth != 0 && count > 0
-        kids = children(acc).map_with_index do |child, i|
-          build(child, opts, path.empty? ? i.to_s : "#{path}/#{i}", depth - 1)
+        kids = [] of Node
+        children(acc).each_with_index do |child, i|
+          if node = build(child, opts, path.empty? ? i.to_s : "#{path}/#{i}", depth - 1, root: false)
+            kids << node
+          end
         end
       end
 
       Node.new(role, name, description, path, pid, states, extents, text, value, actions, count, kids, secret || nil)
+    end
+
+    # Hidden means not VISIBLE, or not SHOWING with no real on-screen box.
+    # SHOWING alone is not enough: Firefox clears it for its whole chrome
+    # while the window is occluded, but its collapsed menus are also
+    # "visible, not showing" — the -1x-1 extents are what tell them apart.
+    def self.hidden?(set : Atspi::StateSet?, extents : Extents?) : Bool
+      return false unless set
+      return true unless set.contains(Atspi::StateType::Visible)
+      return false if set.contains(Atspi::StateType::Showing)
+      extents.nil? || extents.width <= 0 || extents.height <= 0
     end
 
     # Password entries: the toolkit masks them on screen, so we do too.
@@ -295,8 +319,7 @@ module Camelot
       ancestry(acc).skip(1).map { |a| safe(-1) { a.index_in_parent } }.join("/")
     end
 
-    def self.state_names(acc : Atspi::Accessible, all : Bool) : Array(String)
-      set = safe(nil) { acc.state_set }
+    def self.state_names(set : Atspi::StateSet?, all : Bool) : Array(String)
       return [] of String unless set
       # `contains` is a local bitmask test; only fetching the set hits the bus.
       names = Atspi::StateType.values.select { |s| set.contains(s) }.map { |s| s.to_s.underscore.tr("_", " ") }
@@ -313,6 +336,10 @@ module Camelot
       end
     end
 
+    # Hypertext marks each embedded child with U+FFFC; that is structure the
+    # tree already shows, not content, so it is stripped.
+    EMBEDDED_OBJECT = '￼'
+
     # Text content, capped at `max` characters kept around the caret.
     # `max` 0 skips text entirely; negative means unlimited.
     def self.text_of(acc : Atspi::Accessible, max : Int32) : TextInfo?
@@ -323,12 +350,15 @@ module Camelot
         length = t.character_count
         next nil if length <= 0
         caret = t.caret_offset
-        if max < 0 || length <= max
-          TextInfo.new(length, caret, 0, t.text(0, length), false)
-        else
-          start = (caret - max // 2).clamp(0, length - max)
-          TextInfo.new(length, caret, start, t.text(start, start + max), true)
-        end
+        info = if max < 0 || length <= max
+                 TextInfo.new(length, caret, 0, t.text(0, length), false)
+               else
+                 start = (caret - max // 2).clamp(0, length - max)
+                 TextInfo.new(length, caret, start, t.text(start, start + max), true)
+               end
+        next info unless info.content.includes?(EMBEDDED_OBJECT)
+        content = info.content.delete(EMBEDDED_OBJECT)
+        content.blank? ? nil : info.copy_with(content: content)
       end
     end
 

@@ -29,6 +29,9 @@ properties:
   raw:
     type: boolean
     description: Keep anonymous layout containers instead of pruning them
+  hidden:
+    type: boolean
+    description: Include hidden widgets (collapsed menus, closed dialogs, background tabs)
 ---
 name: apps
 description: List applications on the accessibility bus

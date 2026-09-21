@@ -20,6 +20,10 @@ module Camelot
     rescue ex : A11y::Error
       STDERR.puts "camelot: #{ex.message}"
       exit 2
+    rescue ex : IO::Error
+      # `camelot tree | head` closes our stdout; that is not an error.
+      raise ex unless ex.os_error == Errno::EPIPE
+      exit 0
     end
 
     def initialize(@result : Jargon::Result)
@@ -125,7 +129,8 @@ module Camelot
         extents: !bool?("no-extents"),
         actions: bool?("actions"),
         all_states: bool?("all-states"),
-        prune: !bool?("raw"))
+        prune: !bool?("raw"),
+        hidden: bool?("hidden"))
     end
 
     private def str?(key) : String?

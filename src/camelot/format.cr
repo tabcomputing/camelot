@@ -76,7 +76,8 @@ module Camelot
     private def self.block(io : IO, t : A11y::TextInfo, indent : Int32) : Nil
       pad = "  " * indent
       span = t.truncated ? " (chars #{t.offset}-#{t.offset + t.content.size} of #{t.length})" : ""
-      io.puts "#{pad}text#{span}, caret at #{t.caret}:"
+      caret = t.caret >= 0 ? ", caret at #{t.caret}" : ""
+      io.puts "#{pad}text#{span}#{caret}:"
       t.content.each_line(chomp: true) { |l| io.puts "#{pad}| #{l}" }
     end
   end
