@@ -46,6 +46,54 @@ mcp-add:
 mcp-remove:
     claude mcp remove --scope user camelot
 
+# ---- release ---------------------------------------------------------------
+
+# Bump the version everywhere: shard.yml and src/camelot/version.cr (the
+# sources of truth), PKGBUILD, the RPM spec, and the Debian changelog. A new
+# dated changelog stanza is prepended for deb and rpm.
+# Usage: just bump-version 0.2.0 "Summary of the release"
+bump-version new_version message='New upstream release.':
+    #!/usr/bin/env bash
+    set -euo pipefail
+    ver='{{new_version}}'
+    msg='{{message}}'
+    maint='Thomas Sawyer <transfire@gmail.com>'
+
+    if [[ ! "$ver" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        echo "error: version must be X.Y.Z (got '$ver')" >&2
+        exit 1
+    fi
+
+    # 1. Sources of truth: shard.yml (read by the just `version` var and the
+    #    package jobs) and the VERSION constant behind `camelot --version`.
+    sed -i "s/^version: .*/version: $ver/" shard.yml
+    sed -i "s/^  VERSION = \".*\"/  VERSION = \"$ver\"/" src/camelot/version.cr
+
+    # 2. Arch PKGBUILD (reset pkgrel to 1 for the new version).
+    sed -i "s/^pkgver=.*/pkgver=$ver/" pkg/PKGBUILD
+    sed -i "s/^pkgrel=.*/pkgrel=1/" pkg/PKGBUILD
+
+    # 3. RPM spec: version, release, and a new %changelog entry on top.
+    sed -i "s/^Version:.*/Version:        $ver/" pkg/camelot.spec
+    sed -i "s/^Release:.*/Release:        1%{?dist}/" pkg/camelot.spec
+    awk -v e="* $(LC_ALL=C date '+%a %b %d %Y') $maint - $ver-1\n- $msg\n" \
+        '/^%changelog/ { print; print e; next } { print }' \
+        pkg/camelot.spec > pkg/camelot.spec.tmp && mv pkg/camelot.spec.tmp pkg/camelot.spec
+
+    # 4. Debian changelog: prepend a new stanza.
+    { printf 'camelot (%s-1) unstable; urgency=medium\n\n  * %s\n\n -- %s  %s\n\n' \
+          "$ver" "$msg" "$maint" "$(LC_ALL=C date -R)"; \
+      cat pkg/debian/changelog; } > pkg/debian/changelog.tmp \
+      && mv pkg/debian/changelog.tmp pkg/debian/changelog
+
+    echo "bumped camelot to $ver in:"
+    echo "  shard.yml  src/camelot/version.cr  pkg/PKGBUILD  pkg/camelot.spec  pkg/debian/changelog"
+    echo
+    echo "review the changes, then commit and tag:"
+    echo "  git commit -am 'Bump version to $ver'"
+    echo "  git tag v$ver && git push origin main --tags"
+    echo "then publish the v$ver release on GitHub; the Package workflow attaches the packages."
+
 # ---- packages --------------------------------------------------------------
 
 # Source tarball of the tracked files, as every package format consumes it.
