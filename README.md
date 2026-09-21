@@ -42,6 +42,7 @@ camelot context              # what the user is doing, packaged for an AI
 camelot focus                # the widget with keyboard focus (+ its text)
 camelot tree [APP]           # the widget tree of an app (default: active app)
 camelot at X Y               # the widget under a window-relative point
+camelot mcp                  # serve all of the above as MCP tools (stdio)
 ```
 
 Every command takes `-f json|yaml|text` (`text` is the default). Snapshot
@@ -143,6 +144,28 @@ A snapshot node (`json`/`yaml`):
 `value` appears for sliders/scrollbars; `description` when the widget has
 one; `children` only when the node was expanded (`child_count` says whether
 there is more).
+
+## MCP
+
+`camelot mcp` serves the commands above as [Model Context Protocol](https://modelcontextprotocol.io)
+tools over stdio. The tool definitions are generated from the same Jargon
+schemas that drive the CLI, and each call is parsed by Jargon exactly as a
+command line would be, so validation, defaults and output are identical.
+
+Register it with Claude Code once (user scope, since it is about your
+desktop rather than any one project):
+
+```sh
+claude mcp add --scope user camelot -- /path/to/camelot mcp
+```
+
+Then in any session: *"look at what I'm looking at"* → the agent calls
+`context`; *"what's in my editor?"* → `tree`; and so on. Tools default to
+`text` output, which is the most token-efficient; pass `format: json` when
+the caller wants structure.
+
+Any MCP client works the same way; the server speaks newline-delimited
+JSON-RPC 2.0, protocol version 2025-06-18, tools only.
 
 ## What is never captured
 

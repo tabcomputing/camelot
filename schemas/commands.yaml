@@ -18,7 +18,7 @@ properties:
     description: Max characters of text content per node (0 = none, -1 = unlimited)
   no-extents:
     type: boolean
-    description: Omit screen extents
+    description: Omit position and size
   actions:
     type: boolean
     short: a
@@ -109,3 +109,7 @@ allOf:
         type: integer
         default: 4000
         description: Max characters of text kept around the caret (-1 = unlimited)
+---
+name: mcp
+description: Serve the commands above as MCP tools over stdio (for Claude Code and other MCP clients)
+properties: {}
