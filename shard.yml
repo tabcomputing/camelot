@@ -1,0 +1,26 @@
+name: camelot
+version: 0.1.0
+
+description: |
+  A context bridge between the Linux desktop and AI: sees what the user is
+  doing (AT-SPI accessibility tree, focus, windows) and reports it as
+  text, JSON or YAML.
+
+authors:
+  - Thomas Sawyer <transfire@gmail.com>
+
+targets:
+  camelot:
+    main: src/cli.cr
+
+crystal: '>= 1.21.0'
+
+license: MIT
+
+dependencies:
+  jargon:
+    github: trans/jargon
+    version: ">= 0.20.0"
+  gi-crystal:
+    github: hugopl/gi-crystal
+    version: ">= 0.15.2"

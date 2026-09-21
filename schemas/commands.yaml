@@ -1,0 +1,108 @@
+# Camelot CLI, one Jargon schema per subcommand. Embedded at compile time
+# (see src/cli.cr); the same JSON Schema doubles as the MCP tool contract.
+---
+$id: output
+properties:
+  format:
+    type: string
+    enum: [text, json, yaml]
+    default: text
+    short: f
+    description: Output format
+---
+$id: snapshot
+properties:
+  max-text:
+    type: integer
+    default: 200
+    description: Max characters of text content per node (0 = none, -1 = unlimited)
+  no-extents:
+    type: boolean
+    description: Omit screen extents
+  actions:
+    type: boolean
+    short: a
+    description: Include the actions each node offers
+  all-states:
+    type: boolean
+    description: Keep the noisy states too (enabled, visible, showing...)
+  raw:
+    type: boolean
+    description: Keep anonymous layout containers instead of pruning them
+---
+name: apps
+description: List applications on the accessibility bus
+allOf:
+  - {$ref: output}
+---
+name: windows
+description: List top-level windows, the active one flagged
+allOf:
+  - {$ref: output}
+  - {$ref: snapshot}
+  - properties:
+      app:
+        type: string
+        description: Only this application (name, substring, or pid)
+---
+name: tree
+description: Dump the accessible tree of an application
+positional: [app]
+allOf:
+  - {$ref: output}
+  - {$ref: snapshot}
+  - properties:
+      app:
+        type: string
+        description: "Application name, substring, or pid (default: the active window's app)"
+      depth:
+        type: integer
+        default: -1
+        short: d
+        description: How many levels to descend (-1 = unlimited)
+      path:
+        type: string
+        short: p
+        description: Start at this index path within the app (e.g. 0/3/1)
+required: []
+---
+name: focus
+description: Show the widget that has keyboard focus
+allOf:
+  - {$ref: output}
+  - {$ref: snapshot}
+  - properties:
+      max-text: {type: integer, default: 4000}
+      depth:
+        type: integer
+        default: 0
+        short: d
+        description: Also descend into the focused widget this many levels
+---
+name: at
+description: Show the widget under a point, relative to the active window
+positional: [x, y]
+allOf:
+  - {$ref: output}
+  - {$ref: snapshot}
+  - properties:
+      x: {type: integer, description: X offset from the window's left edge}
+      y: {type: integer, description: Y offset from the window's top edge}
+      app:
+        type: string
+        description: Look in this application's window instead of the active one
+      screen:
+        type: boolean
+        short: s
+        description: Treat x,y as absolute screen coordinates and search every window (X11 apps only)
+required: [x, y]
+---
+name: context
+description: "Snapshot of what the user is doing: app, window, focused widget and its text"
+allOf:
+  - {$ref: output}
+  - properties:
+      max-text:
+        type: integer
+        default: 4000
+        description: Max characters of text kept around the caret (-1 = unlimited)

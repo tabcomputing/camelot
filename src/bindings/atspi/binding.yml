@@ -1,0 +1,9 @@
+# gi-crystal binding config: run `bin/gi-crystal` after `shards install` to
+# generate the Atspi bindings into lib/gi-crystal/src/auto/atspi-2.0.
+namespace: Atspi
+version: "2.0"
+types:
+  StateSet:
+    # Returns a GArray, which gi-crystal cannot convert; use `contains` instead.
+    ignore_methods:
+      - get_states

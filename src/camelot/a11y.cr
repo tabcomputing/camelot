@@ -1,0 +1,371 @@
+require "json"
+require "yaml"
+require "gi-crystal"
+
+GICrystal.require("Atspi", "2.0")
+
+@[Link("glib-2.0")]
+lib LibGLibArray
+  fun g_array_free(array : Void*, free_segment : LibC::Int) : Pointer(LibC::Char)
+end
+
+module Camelot
+  # Read side of the AT-SPI2 accessibility bus: turns live `Atspi::Accessible`
+  # objects into plain, serializable `Node` snapshots. Every D-Bus round trip
+  # can fail (the app may have died mid-walk), so lookups are best-effort and
+  # degrade to `nil` / empty rather than aborting a whole dump.
+  module A11y
+    CACHE_DEFAULT = Atspi::Cache::Parent | Atspi::Cache::Children | Atspi::Cache::Name |
+                    Atspi::Cache::Description | Atspi::Cache::States | Atspi::Cache::Role |
+                    Atspi::Cache::Interfaces
+
+    class Error < Exception; end
+
+    def self.init : Nil
+      return if Atspi.is_initialized
+      status = Atspi.init
+      raise Error.new("could not connect to the accessibility bus (atspi_init=#{status}); is at-spi2 running?") unless status.zero?
+    end
+
+    # ---- Snapshot types ------------------------------------------------------
+
+    record Extents, x : Int32, y : Int32, width : Int32, height : Int32 do
+      include JSON::Serializable
+      include YAML::Serializable
+    end
+
+    # Text-interface content. `content` is capped; `truncated` says so, and
+    # `offset` is where `content` starts within the full text.
+    record TextInfo, length : Int32, caret : Int32, offset : Int32, content : String, truncated : Bool do
+      include JSON::Serializable
+      include YAML::Serializable
+    end
+
+    class Node
+      include JSON::Serializable
+      include YAML::Serializable
+
+      # Role name as AT-SPI reports it ("push button", "text", "frame"...).
+      property role : String
+      property name : String?
+      property description : String?
+      # Index path from the application root ("2/0/5"); with `pid` it
+      # addresses the node again later (until the tree changes).
+      property path : String
+      property pid : UInt32?
+      property states : Array(String)
+      property extents : Extents?
+      property text : TextInfo?
+      property value : Float64?
+      property actions : Array(String)?
+      property child_count : Int32
+      property children : Array(Node)?
+      # Set when the widget holds secrets (a password field): its text is
+      # never captured, whatever the options say.
+      property redacted : Bool?
+
+      def initialize(@role, @name, @description, @path, @pid, @states, @extents, @text, @value, @actions, @child_count, @children = nil, @redacted = nil)
+      end
+    end
+
+    # Snapshot knobs. `depth` 0 means "this node only"; negative means unlimited.
+    # `max_text` 0 skips text; negative means unlimited. `prune` splices out
+    # anonymous layout containers (see `WRAPPER_ROLES`) so a tree reads as
+    # content rather than toolkit plumbing.
+    record Options,
+      depth : Int32 = 0,
+      max_text : Int32 = 200,
+      extents : Bool = true,
+      actions : Bool = false,
+      all_states : Bool = false,
+      prune : Bool = true
+
+    # Roles that are pure layout when they carry no name, text or value.
+    WRAPPER_ROLES = ["panel", "grouping", "filler", "section", "scroll pane", "viewport",
+                     "layered pane", "split pane", "root pane", "glass pane"]
+
+    # States that carry information beyond the usual "enabled sensitive
+    # visible showing" chorus; the rest are kept only with `all_states`.
+    QUIET_STATES = %w[enabled sensitive visible showing opaque]
+
+    # ---- Desktop / application access ---------------------------------------
+
+    def self.desktop : Atspi::Accessible
+      init
+      Atspi.desktop(0)
+    end
+
+    def self.applications : Array(Atspi::Accessible)
+      children(desktop)
+    end
+
+    # Find an application by pid, exact name, or case-insensitive substring.
+    def self.application(query : String) : Atspi::Accessible?
+      apps = applications
+      if pid = query.to_u32?
+        apps.find { |a| safe(0_u32) { a.process_id } == pid }
+      else
+        apps.find { |a| safe("") { a.name } == query } ||
+          apps.find { |a| safe("") { a.name }.downcase.includes?(query.downcase) }
+      end
+    end
+
+    def self.windows(app : Atspi::Accessible) : Array(Atspi::Accessible)
+      children(app)
+    end
+
+    def self.active?(acc : Atspi::Accessible) : Bool
+      safe(false) { acc.state_set.contains(Atspi::StateType::Active) }
+    end
+
+    def self.focused?(acc : Atspi::Accessible) : Bool
+      safe(false) { acc.state_set.contains(Atspi::StateType::Focused) }
+    end
+
+    # The window the user is working in, if any app reports one as ACTIVE.
+    def self.active_window : Atspi::Accessible?
+      applications.each do |app|
+        windows(app).each { |w| return w if active?(w) }
+      end
+      nil
+    end
+
+    # The widget with keyboard focus. Looks inside the active window first,
+    # then any window; uses the Collection interface when the toolkit offers
+    # it and falls back to a depth-first walk otherwise.
+    def self.focused : Atspi::Accessible?
+      if win = active_window
+        if f = find_focused(win)
+          return f
+        end
+      end
+      applications.each do |app|
+        windows(app).each do |w|
+          next if active?(w)
+          if f = find_focused(w)
+            return f
+          end
+        end
+      end
+      nil
+    end
+
+    def self.find_focused(root : Atspi::Accessible) : Atspi::Accessible?
+      return root if focused?(root)
+      if safe(false) { root.is_collection }
+        # StateSet's array constructor is a GArray gi-crystal can't marshal;
+        # build the set empty and add to it.
+        focused = Atspi::StateSet.new
+        focused.add(Atspi::StateType::Focused)
+        rule = Atspi::MatchRule.new(
+          focused, Atspi::CollectionMatchType::All,
+          nil, Atspi::CollectionMatchType::Invalid,
+          nil, Atspi::CollectionMatchType::Invalid,
+          nil, Atspi::CollectionMatchType::Invalid,
+          false)
+        hits = safe([] of Atspi::Accessible) { collection_matches(root, rule, 1) }
+        return hits.first unless hits.empty?
+      end
+      dfs_focused(root)
+    end
+
+    private def self.dfs_focused(acc : Atspi::Accessible) : Atspi::Accessible?
+      children(acc).each do |child|
+        return child if focused?(child)
+        if hit = dfs_focused(child)
+          return hit
+        end
+      end
+      nil
+    end
+
+    # Deepest accessible under (x, y) within `window`, in window-relative
+    # coordinates (the only kind Wayland toolkits can answer).
+    # (`contains` is not consulted: GTK answers it wrongly for window coords.)
+    def self.at_point(window : Atspi::Accessible, x : Int32, y : Int32) : Atspi::Accessible?
+      hit = descend_to_point(window, x, y, Atspi::CoordType::Window)
+      hit == window ? nil : hit
+    end
+
+    # Deepest accessible under screen point (x, y), searching every window
+    # that claims to contain it (X11 / XWayland apps report real positions).
+    def self.at_screen_point(x : Int32, y : Int32) : Atspi::Accessible?
+      candidates = [] of Atspi::Accessible
+      applications.each do |app|
+        windows(app).each do |w|
+          next unless safe(false) { w.is_component && w.component_iface.contains(x, y, Atspi::CoordType::Screen) }
+          candidates << w
+        end
+      end
+      # Prefer the active window when several overlap.
+      win = candidates.find { |w| active?(w) } || candidates.first?
+      return nil unless win
+      descend_to_point(win, x, y, Atspi::CoordType::Screen)
+    end
+
+    private def self.descend_to_point(acc : Atspi::Accessible, x, y, coords) : Atspi::Accessible
+      current = acc
+      loop do
+        deeper = safe(nil) { current.is_component ? current.component_iface.accessible_at_point(x, y, coords) : nil }
+        break if deeper.nil? || deeper == current
+        current = deeper
+      end
+      current
+    end
+
+    # Chain from the application down to `acc` (inclusive).
+    def self.ancestry(acc : Atspi::Accessible) : Array(Atspi::Accessible)
+      chain = [acc]
+      current = acc
+      while parent = safe(nil) { current.parent }
+        break if safe("") { parent.role_name } == "desktop frame"
+        chain.unshift(parent)
+        current = parent
+      end
+      chain
+    end
+
+    # ---- Snapshots -----------------------------------------------------------
+
+    def self.snapshot(acc : Atspi::Accessible, opts : Options = Options.new, path : String? = nil) : Node
+      path ||= index_path(acc)
+      node = build(acc, opts, path, opts.depth)
+      if opts.prune
+        node.children = node.children.try { |kids| kids.flat_map { |k| prune(k) } }
+      end
+      node
+    end
+
+    # A wrapper with nothing to say is replaced by its (pruned) children.
+    # Paths are untouched, so a pruned node still addresses the real widget.
+    def self.prune(node : Node) : Array(Node)
+      kids = node.children.try { |cs| cs.flat_map { |k| prune(k) } }
+      node.children = kids
+      if wrapper?(node)
+        kids || [] of Node
+      else
+        [node]
+      end
+    end
+
+    def self.wrapper?(node : Node) : Bool
+      return false unless WRAPPER_ROLES.includes?(node.role)
+      return false if node.name || node.description || node.text || node.value
+      return false if node.actions.try { |a| !a.empty? }
+      return false if node.states.includes?("focused")
+      node.child_count == 0 || !node.children.nil?
+    end
+
+    private def self.build(acc : Atspi::Accessible, opts : Options, path : String, depth : Int32) : Node
+      role = safe("unknown") { acc.role_name }
+      name = blank_to_nil(safe("") { acc.name })
+      description = blank_to_nil(safe("") { acc.description })
+      pid = safe(nil) { acc.process_id }
+      states = state_names(acc, opts.all_states)
+      extents = opts.extents ? extents_of(acc) : nil
+      secret = secret?(acc)
+      text = secret ? nil : text_of(acc, opts.max_text)
+      text = nil if text && text.content == name # labels: the name already says it
+      value = secret ? nil : safe(nil) { acc.is_value ? acc.value_iface.current_value : nil }
+      actions = opts.actions ? actions_of(acc) : nil
+      count = safe(0) { acc.child_count }
+
+      kids = nil
+      if depth != 0 && count > 0
+        kids = children(acc).map_with_index do |child, i|
+          build(child, opts, path.empty? ? i.to_s : "#{path}/#{i}", depth - 1)
+        end
+      end
+
+      Node.new(role, name, description, path, pid, states, extents, text, value, actions, count, kids, secret || nil)
+    end
+
+    # Password entries: the toolkit masks them on screen, so we do too.
+    def self.secret?(acc : Atspi::Accessible) : Bool
+      safe(false) { acc.role == Atspi::Role::PasswordText }
+    end
+
+    def self.children(acc : Atspi::Accessible) : Array(Atspi::Accessible)
+      count = safe(0) { acc.child_count }
+      (0...count).compact_map { |i| safe(nil) { acc.child_at_index(i) } }
+    end
+
+    # Index path of `acc` below its application ("" for the application itself).
+    def self.index_path(acc : Atspi::Accessible) : String
+      ancestry(acc).skip(1).map { |a| safe(-1) { a.index_in_parent } }.join("/")
+    end
+
+    def self.state_names(acc : Atspi::Accessible, all : Bool) : Array(String)
+      set = safe(nil) { acc.state_set }
+      return [] of String unless set
+      # `contains` is a local bitmask test; only fetching the set hits the bus.
+      names = Atspi::StateType.values.select { |s| set.contains(s) }.map { |s| s.to_s.underscore.tr("_", " ") }
+      all ? names : names.reject { |n| QUIET_STATES.includes?(n) }
+    end
+
+    def self.extents_of(acc : Atspi::Accessible) : Extents?
+      safe(nil) do
+        next nil unless acc.is_component
+        # Window-relative: on Wayland toolkits have no global position to
+        # report, so screen coordinates come back as zeros.
+        r = acc.component_iface.extents(Atspi::CoordType::Window)
+        Extents.new(r.x, r.y, r.width, r.height)
+      end
+    end
+
+    # Text content, capped at `max` characters kept around the caret.
+    # `max` 0 skips text entirely; negative means unlimited.
+    def self.text_of(acc : Atspi::Accessible, max : Int32) : TextInfo?
+      return nil if max == 0
+      safe(nil) do
+        next nil unless acc.is_text
+        t = acc.text_iface
+        length = t.character_count
+        next nil if length <= 0
+        caret = t.caret_offset
+        if max < 0 || length <= max
+          TextInfo.new(length, caret, 0, t.text(0, length), false)
+        else
+          start = (caret - max // 2).clamp(0, length - max)
+          TextInfo.new(length, caret, start, t.text(start, start + max), true)
+        end
+      end
+    end
+
+    def self.actions_of(acc : Atspi::Accessible) : Array(String)?
+      safe(nil) do
+        next nil unless acc.is_action
+        a = acc.action_iface
+        (0...a.n_actions).map { |i| a.localized_name(i) }
+      end
+    end
+
+    # ---- Helpers -------------------------------------------------------------
+
+    # Hand-rolled `atspi_collection_get_matches`: it returns a GArray of
+    # AtspiAccessible*, which gi-crystal does not know how to unpack.
+    def self.collection_matches(acc : Atspi::Accessible, rule : Atspi::MatchRule, count : Int32) : Array(Atspi::Accessible)
+      error = Pointer(LibGLib::Error).null
+      garray = LibAtspi.atspi_collection_get_matches(acc.to_unsafe, rule.to_unsafe,
+        Atspi::CollectionSortOrder::Canonical.value, count, 1, pointerof(error))
+      Atspi.raise_gerror(error) unless error.null?
+      return [] of Atspi::Accessible if garray.null?
+      arr = garray.as(Pointer(LibGLib::Array)).value
+      items = arr.data.as(Pointer(Pointer(Void)))
+      result = (0...arr.len).map { |i| Atspi::Accessible.new(items[i], GICrystal::Transfer::Full) }
+      LibGLibArray.g_array_free(garray.as(Void*), 0)
+      result
+    end
+
+    private def self.blank_to_nil(s : String) : String?
+      s.empty? ? nil : s
+    end
+
+    # Run an AT-SPI call, returning `default` if the bus throws.
+    def self.safe(default : T, &block : -> U) : T | U forall T, U
+      yield
+    rescue GLib::Error | ArgumentError
+      default
+    end
+  end
+end
