@@ -1,11 +1,10 @@
-# NOTICE: This lockfile contains some overrides from shard.override.yml
 version: 2.0
 shards:
   gi-crystal:
     git: https://github.com/hugopl/gi-crystal.git
     version: 0.26.0
 
-  jargon: # Overridden
-    path: /home/trans/Projects/jargon
-    version: 0.20.0
+  jargon:
+    git: https://github.com/trans/jargon.git
+    version: 0.20.1
 
