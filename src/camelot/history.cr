@@ -23,9 +23,12 @@ module Camelot
       def initialize(@time, @kind, @app, @pid, @role, @name, @path, @text = nil, @count = 1, @until = nil)
       end
 
-      # Same widget as `e`, for coalescing.
-      def same_widget?(e : Events::Event) : Bool
-        pid == e.pid && path == e.path
+      # The last non-blank line of an insertion, capped: a hint, not a log.
+      def self.snippet(text : String?) : String?
+        return nil unless text
+        line = text.lines.reverse.find { |l| !l.blank? }.try(&.strip)
+        return nil unless line
+        line.size > SNIPPET_MAX ? line[0, SNIPPET_MAX] + "…" : line
       end
     end
 
@@ -64,29 +67,39 @@ module Camelot
       @events.select { |e| e.time >= since }
     end
 
+    # Edits on one widget fold into one entry while they keep coming
+    # within this gap — longer for terminals, whose repaints are output,
+    # not typing.
+    FOLD_GAP          = 5.seconds
+    TERMINAL_FOLD_GAP = 60.seconds
+    SNIPPET_MAX       = 100
+
     # Digest of events newer than `since`, newest last, at most `limit`
-    # lines. Text edits on one widget fold into one line; focus-lost and
-    # window-deactivate events are noise and dropped.
+    # lines. Text edits on one widget fold into one entry (even when other
+    # widgets' events interleave); focus-lost and window-deactivate events
+    # are noise and dropped.
     def recent(since : Time, limit : Int32 = 50) : Array(Entry)
       entries = [] of Entry
+      open_edits = {} of {UInt32?, String?} => Entry
       since(since).each do |e|
         case e.type
         when "window:activate"
           entries << Entry.new(e.time, "window", e.app, e.pid, e.role, e.name, e.path)
         when "object:state-changed:focused"
           next unless e.detail1 == 1
-          # A focus event right after the window switch to the same app is
-          # what always happens; keep it, it names the widget.
           entries << Entry.new(e.time, "focus", e.app, e.pid, e.role, e.name, e.path)
         when .starts_with?("object:text-changed")
-          last = entries.last?
-          if last && last.kind == "edit" && last.same_widget?(e)
-            last.count += 1
-            last.until = e.time
-            last.text = e.text if e.type.ends_with?("insert") && e.text
+          key = {e.pid, e.path}
+          gap = e.role == "terminal" ? TERMINAL_FOLD_GAP : FOLD_GAP
+          snippet = e.type.ends_with?("insert") ? Entry.snippet(e.text) : nil
+          if (open = open_edits[key]?) && e.time - (open.until || open.time) <= gap
+            open.count += 1
+            open.until = e.time
+            open.text = snippet if snippet
           else
-            text = e.type.ends_with?("insert") ? e.text : nil
-            entries << Entry.new(e.time, "edit", e.app, e.pid, e.role, e.name, e.path, text)
+            entry = Entry.new(e.time, e.role == "terminal" ? "output" : "edit", e.app, e.pid, e.role, e.name, e.path, snippet)
+            entries << entry
+            open_edits[key] = entry
           end
         when "document:load-complete"
           entries << Entry.new(e.time, "load", e.app, e.pid, e.role, e.name, e.path)

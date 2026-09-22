@@ -62,8 +62,8 @@ module Camelot
         when "window" then io << "window  " << e.app << ": " << widget
         when "focus"  then io << "focus   " << e.app << ": " << widget
         when "load"   then io << "loaded  " << e.app << ": " << widget
-        when "edit"
-          io << "edit    " << e.app << ": " << widget
+        when "edit", "output"
+          io << e.kind.ljust(7) << " " << e.app << ": " << widget
           io << " ×" << e.count if e.count > 1
           if u = e.until
             io << " over " << (u - e.time).total_seconds.round(1) << "s" if e.count > 1

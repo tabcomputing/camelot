@@ -22,15 +22,28 @@ describe Camelot::History do
     h.record(ev("object:text-changed:delete", 3, text: "l"))
     h.record(ev("object:text-changed:insert", 4, text: "llo"))
     h.record(ev("object:text-changed:insert", 5, path: "0/2", name: "Title", text: "T"))
-    h.record(ev("window:deactivate", 6)) # noise
+    h.record(ev("object:text-changed:insert", 6, text: "!")) # back to Body: still the same burst
+    h.record(ev("window:deactivate", 7))                     # noise
 
     entries = h.recent(Time.local(2026, 9, 21, 11, 0, 0))
     entries.map(&.kind).should eq %w[window focus edit edit]
     burst = entries[2]
-    burst.count.should eq 3
-    burst.text.should eq "llo"
-    burst.until.not_nil!.should eq entries[2].time + 2.seconds
+    burst.count.should eq 4
+    burst.text.should eq "!"
+    burst.until.not_nil!.should eq entries[2].time + 4.seconds
     entries[3].name.should eq "Title"
+  end
+
+  it "keeps snippets to one capped line and folds terminal repaints over a longer gap" do
+    h = Camelot::History.new(2000, (365 * 100).days)
+    h.record(ev("object:text-changed:insert", 0, role: "terminal", text: "line one\n" + "x" * 300 + "\n\n"))
+    h.record(ev("object:text-changed:insert", 30, role: "terminal", text: "$ ls"))
+    h.record(ev("object:text-changed:insert", 100, role: "terminal", text: "later"))
+    entries = h.recent(Time.local(2026, 9, 21, 11, 0, 0))
+    entries.map(&.kind).should eq %w[output output]
+    entries[0].count.should eq 2
+    entries[0].text.should eq "$ ls"
+    Camelot::History::Entry.snippet("a\n" + "y" * 150).not_nil!.size.should eq 101
   end
 
   it "expires events older than the retention window" do

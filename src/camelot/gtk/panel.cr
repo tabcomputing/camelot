@@ -134,9 +134,7 @@ module Camelot
               s << " over " << (u - e.time).total_seconds.round(1) << "s"
             end
             if t = e.text
-              snippet = t.gsub('\n', "⏎")
-              snippet = snippet[0, 80] + "…" if snippet.size > 80
-              s << "  “" << snippet << "”"
+              s << "  “" << t << "”"
             end
           end
           row.subtitle = detail.gsub("&", "&amp;").gsub("<", "&lt;")
@@ -144,6 +142,7 @@ module Camelot
                  when "window" then "window-symbolic"
                  when "focus"  then "input-keyboard-symbolic"
                  when "edit"   then "document-edit-symbolic"
+                 when "output" then "utilities-terminal-symbolic"
                  else               "document-open-symbolic"
                  end
           row.add_prefix(::Gtk::Image.new_from_icon_name(icon))
