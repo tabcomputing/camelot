@@ -22,7 +22,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             libgirepository1.0-dev gir1.2-atspi-2.0 libatspi2.0-dev \
-            libglib2.0-dev libdbus-1-dev libgc-dev libpcre2-dev libyaml-dev zlib1g-dev
+            libglib2.0-dev libdbus-1-dev libgc-dev libpcre2-dev libyaml-dev zlib1g-dev \
+            libgtk-4-dev libadwaita-1-dev gir1.2-gtk-4.0 gir1.2-adw-1
 
       - name: Install shards and generate Atspi bindings
         run: |
@@ -35,8 +36,10 @@ jobs:
       - name: Run specs
         run: crystal spec
 
-      - name: Build executable
-        run: crystal build src/cli.cr -o bin/camelot
+      - name: Build executables
+        run: |
+          crystal build src/cli.cr -o bin/camelot
+          crystal build src/gtk.cr -o bin/camelot-gtk
 
       - name: Smoke test CLI
         run: |

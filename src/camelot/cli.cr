@@ -37,6 +37,16 @@ module Camelot
             result["history"]?.try(&.as_i64?).try(&.to_i32) || Config.current.history).run
         when "watch"
           new(result).dispatch
+        when "subscribe"
+          seconds = result["seconds"]?.try(&.as_i64?)
+          streamed = Client.subscribe(seconds) do |msg|
+            case msg
+            in Events::Event  then puts msg.to_json
+            in Daemon::Status then puts({"state" => msg}.to_json)
+            end
+            STDOUT.flush
+          end
+          raise Error.new("`subscribe` needs the daemon: start it with `camelot daemon`") if streamed.nil?
         else
           # A running daemon answers with warm caches and can answer
           # `recent`/`status`; otherwise run here.
@@ -124,7 +134,7 @@ module Camelot
         path = p.strip("/")
         path.split("/").each do |i|
           idx = i.to_i? || fail("bad path segment: #{i}")
-          root = A11y.safe(nil) { root.child_at_index(idx) } || fail("no child at #{path}")
+          root = A11y.child_at_index?(root, idx) || fail("no child at #{path}")
         end
       end
       opts = snapshot_options(depth: int?("depth") || -1)
@@ -164,8 +174,7 @@ module Camelot
       stats_every = int?("stats") || 0
       count = 0
 
-      listener = Events::Listener.new do |ev|
-        event = Events.capture(ev)
+      queue = Events::Queue.new(types) do |event|
         count += 1
         case @format
         when "json" then @out.puts event.to_json
@@ -174,7 +183,6 @@ module Camelot
         end
         @out.flush
       end
-      types.each { |t| listener.register(t) }
 
       if stats_every > 0
         # A plain Crystal fiber running alongside the GLib pump: the proof
@@ -188,7 +196,7 @@ module Camelot
       end
 
       Events.pump(duration > 0 ? Time.instant + duration.seconds : nil)
-      listener.deregister_all
+      queue.close
     end
 
     # ---- helpers --------------------------------------------------------------

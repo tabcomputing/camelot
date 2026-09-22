@@ -19,8 +19,9 @@ module Camelot
                    history_size : Int32? = nil, @log : IO = STDERR, @config : Config = Config.current)
       @history = History.new(history_size || @config.history, @config.retention)
       @started = Time.local
-      @stop = Channel(Nil).new
+      @stop = Channel(Nil).new(1) # buffered: the signal handler must not block
       @sink = nil.as(Sink?)
+      @subscribers = [] of Subscriber
     end
 
     def run : Nil
@@ -28,14 +29,19 @@ module Camelot
       server = listen
       apply_config(first: true)
 
-      listener = Events::Listener.new { |ev| record(ev) }
-      Events::DEFAULT_TYPES.each { |t| listener.register(t) }
+      queue = Events::Queue.new { |event| record(event) }
 
-      Process.on_terminate { @stop.send(nil) }
+      Process.on_terminate do
+        select
+        when @stop.send(nil)
+        else
+        end
+      end
       spawn(name: "camelot-accept") { accept_loop(server) }
       Events.pump(stop: @stop)
     ensure
-      listener.try &.deregister_all
+      queue.try &.close
+      @subscribers.dup.each(&.close)
       server.try &.close
       @sink.try &.close
       File.delete?(@socket_path)
@@ -48,13 +54,80 @@ module Camelot
 
     # ---- recording -----------------------------------------------------------
 
-    private def record(ev : Atspi::Event) : Nil
+    private def record(event : Events::Event) : Nil
       return if paused?
-      event = Events.capture(ev)
       return if @config.ignored?(event.app)
       event.text = nil unless @config.text
       @history.record(event)
       @sink.try &.write(event)
+      broadcast({"event" => event}.to_json)
+    end
+
+    # A client of `subscribe`: a long-lived connection that receives every
+    # recorded event and every state change as JSON lines, written by its
+    # own fiber through a bounded queue so a stalled client cannot stall
+    # the daemon — it is dropped instead.
+    class Subscriber
+      getter socket : UNIXSocket
+
+      def initialize(@socket, @on_close : Subscriber ->)
+        @queue = Channel(String).new(4096)
+        spawn(name: "camelot-subscriber") do
+          begin
+            while line = @queue.receive?
+              @socket.puts line
+              @socket.flush
+            end
+          rescue IO::Error
+          ensure
+            @socket.close rescue nil
+            @on_close.call(self)
+          end
+        end
+      end
+
+      # Queue a line; false if the client is too far behind.
+      def push(line : String) : Bool
+        select
+        when @queue.send(line) then true
+        else
+          false
+        end
+      end
+
+      def close : Nil
+        @queue.close
+      end
+    end
+
+    private def broadcast(line : String) : Nil
+      @subscribers.dup.each do |sub|
+        unless sub.push(line)
+          @log.puts "camelot daemon: dropping a subscriber that stopped reading"
+          @subscribers.delete(sub)
+          sub.close
+        end
+      end
+    end
+
+    private def broadcast_state : Nil
+      broadcast({"state" => status_info}.to_json) unless @subscribers.empty?
+    end
+
+    # Hand a connection over to the subscriber list: backfill, then stream
+    # until the client hangs up.
+    private def subscribe(client : UNIXSocket, args : JSON::Any) : Nil
+      seconds = args["seconds"]?.try(&.as_i64?) || @history.retention.total_seconds.to_i64
+      sub = Subscriber.new(client, ->(gone : Subscriber) { @subscribers.delete(gone); nil })
+      @subscribers << sub
+      @history.since(Time.local - seconds.seconds).each { |e| sub.push({"event" => e}.to_json) }
+      sub.push({"state" => status_info}.to_json)
+      # Reading detects the hang-up (clients send nothing more).
+      client.read_timeout = nil
+      client.gets
+    rescue IO::Error
+    ensure
+      sub.try &.close
     end
 
     # Durable log: one JSON line per event, one file per day.
@@ -153,12 +226,17 @@ module Camelot
     private def serve(client : UNIXSocket) : Nil
       client.read_timeout = 10.seconds
       if line = client.gets
+        request = JSON.parse(line) rescue nil
+        if request && request["command"]? == "subscribe"
+          subscribe(client, request["arguments"]? || JSON.parse("{}"))
+          return
+        end
         client.puts respond(line).to_json
       end
     rescue IO::Error
       # client went away
     ensure
-      client.close
+      client.close rescue nil
     end
 
     def respond(line : String) : Hash(String, String | Bool)
@@ -204,12 +282,15 @@ module Camelot
 
     private def status(args : JSON::Any) : {String, Bool}
       format = args["format"]?.try(&.as_s?) || "text"
-      info = Status.new(Process.pid, @started, (Time.local - @started).total_seconds.round(1),
+      buffer = IO::Memory.new
+      Format.emit(buffer, status_info, format)
+      {buffer.to_s, false}
+    end
+
+    def status_info : Status
+      Status.new(Process.pid, @started, (Time.local - @started).total_seconds.round(1),
         @history.count, @history.total, @history.size, @history.retention.total_seconds.to_i64,
         @config.text, @paused_since, @sink.try(&.dir), @sink.try(&.since), @config.ignore, @socket_path)
-      buffer = IO::Memory.new
-      Format.emit(buffer, info, format)
-      {buffer.to_s, false}
     end
 
     private def pause : {String, Bool}
@@ -218,6 +299,7 @@ module Camelot
       end
       @paused_since = Time.local
       @log.puts "camelot daemon: recording paused"
+      broadcast_state
       {"recording paused\n", false}
     end
 
@@ -225,6 +307,7 @@ module Camelot
       return {"not paused\n", false} unless paused?
       @paused_since = nil
       @log.puts "camelot daemon: recording resumed"
+      broadcast_state
       {"recording resumed\n", false}
     end
 
@@ -232,6 +315,7 @@ module Camelot
       @config = Config.load
       Config.current = @config # keeps A11y.snapshot's ignore check in step
       apply_config
+      broadcast_state
       {"reloaded #{Config.path}\n", false}
     rescue ex : Config::Error
       {ex.message.to_s, true}

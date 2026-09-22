@@ -1,3 +1,5 @@
+# Specs never talk to a running daemon.
+ENV["CAMELOT_LOCAL"] = "1"
 require "file_utils"
 require "spec"
 require "../src/camelot"

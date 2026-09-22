@@ -23,7 +23,9 @@ jobs:
           - name: Debian
             recipe: pkg-deb
             artifact: camelot-deb
-            glob: "pkg/camelot_*.deb"
+            glob: |
+              pkg/camelot_*.deb
+              pkg/camelot-gtk_*.deb
           - name: Fedora
             recipe: pkg-rpm
             artifact: camelot-rpm

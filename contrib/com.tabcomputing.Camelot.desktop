@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Camelot
+Comment=What your AI can see of your desktop, and the controls for it
+Exec=camelot-gtk
+Icon=utilities-system-monitor
+Terminal=false
+Categories=Utility;GNOME;GTK;
+Keywords=accessibility;ai;mcp;privacy;
+StartupNotify=true

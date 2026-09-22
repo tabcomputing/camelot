@@ -166,6 +166,14 @@ name: reload
 description: Make the daemon re-read its config file
 properties: {}
 ---
+name: subscribe
+description: "Stream the daemon's recorded events and state changes as JSON lines (backfill first); Ctrl-C to stop"
+properties:
+  seconds:
+    type: integer
+    short: s
+    description: "How much history to backfill (default: everything retained)"
+---
 name: daemon
 description: Run the background service that keeps the bus warm and records activity for `recent`
 properties:

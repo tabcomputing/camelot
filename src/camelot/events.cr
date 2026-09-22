@@ -50,8 +50,14 @@ module Camelot
       def initialize(&handler : Atspi::Event ->)
         A11y.init
         @box = Box.box(handler)
+        # An exception must never unwind through libatspi's C frames (it
+        # leaves its dispatch state wedged), so the handler is fenced here.
         callback = ->(event : Pointer(LibAtspi::Event), data : Pointer(Void)) {
-          Box(Proc(Atspi::Event, Nil)).unbox(data).call(Atspi::Event.new(event.as(Void*), GICrystal::Transfer::None))
+          begin
+            Box(Proc(Atspi::Event, Nil)).unbox(data).call(Atspi::Event.new(event.as(Void*), GICrystal::Transfer::None))
+          rescue ex
+            STDERR.puts "camelot: event handler failed: #{ex.inspect_with_backtrace}"
+          end
         }
         @listener = LibAtspi.atspi_event_listener_new(callback.pointer, @box, Pointer(Void).null)
       end
@@ -176,24 +182,64 @@ module Camelot
       ptr.null? ? nil : String.new(ptr)
     end
 
-    # Snapshot the parts of a libatspi event we want, while it is still valid.
-    def self.capture(ev : Atspi::Event) : Event
-      source = ev.source
-      app = source.try { |s| A11y.safe(nil) { s.application } }
-      text = nil
-      if ev.type.try(&.starts_with?("object:text-changed"))
+    # What a callback may take from a libatspi event without talking to the
+    # bus: libatspi delivers events while it waits on a synchronous call, so
+    # a handler that makes calls of its own nests D-Bus round trips inside a
+    # dispatch inside a round trip. Names are resolved later, from a fiber,
+    # by `Pending#resolve`. The source is ref'd and stays valid.
+    record Pending, time : Time, type : String, source : Atspi::Accessible?, detail1 : Int32, detail2 : Int32, text : String? do
+      def resolve : Event
+        src = source
+        app = src.try { |s| A11y.application?(s) }
+        payload = text
         # Never the keystrokes going into a password field.
-        text = string_payload(ev) unless source && A11y.secret?(source)
+        payload = nil if payload && src && A11y.secret?(src)
+        Event.new(
+          time, type,
+          app.try { |a| A11y.safe(nil) { a.name } },
+          src.try { |s| A11y.safe(nil) { s.process_id } },
+          src.try { |s| A11y.safe(nil) { s.role_name } },
+          src.try { |s| A11y.safe(nil) { s.name } }.try { |n| n.empty? ? nil : n },
+          src.try { |s| A11y.safe(nil) { A11y.index_path(s) } },
+          detail1, detail2, payload)
       end
-      Event.new(
-        Time.local,
-        ev.type || "?",
-        app.try { |a| A11y.safe(nil) { a.name } },
-        source.try { |s| A11y.safe(nil) { s.process_id } },
-        source.try { |s| A11y.safe(nil) { s.role_name } },
-        source.try { |s| A11y.safe(nil) { s.name } }.try { |n| n.empty? ? nil : n },
-        source.try { |s| A11y.safe(nil) { A11y.index_path(s) } },
-        ev.detail1, ev.detail2, text)
+    end
+
+    # Take the cheap parts of a libatspi event while it is still valid.
+    def self.pending(ev : Atspi::Event) : Pending
+      type = ev.type || "?"
+      text = type.starts_with?("object:text-changed") ? string_payload(ev) : nil
+      Pending.new(Time.local, type, ev.source, ev.detail1, ev.detail2, text)
+    end
+
+    # A listener whose handler runs in a fiber, off the dispatch path, with
+    # the event already resolved. Bursts are queued (bounded); a flood the
+    # handler cannot keep up with is dropped rather than stalling libatspi.
+    class Queue
+      getter dropped : Int64 = 0
+
+      def initialize(types : Array(String) = DEFAULT_TYPES, capacity : Int32 = 4096, &handler : Event ->)
+        @channel = Channel(Pending).new(capacity)
+        @listener = Listener.new do |ev|
+          p = Events.pending(ev)
+          select
+          when @channel.send(p)
+          else
+            @dropped += 1
+          end
+        end
+        types.each { |t| @listener.register(t) }
+        spawn(name: "camelot-events") do
+          while p = @channel.receive?
+            handler.call(p.resolve)
+          end
+        end
+      end
+
+      def close : Nil
+        @listener.deregister_all
+        @channel.close
+      end
     end
   end
 end

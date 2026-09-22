@@ -22,6 +22,8 @@ BuildRequires:  pcre2-devel
 BuildRequires:  libyaml-devel
 BuildRequires:  zlib-devel
 BuildRequires:  systemd-rpm-macros
+BuildRequires:  gtk4-devel
+BuildRequires:  libadwaita-devel
 
 Requires:       at-spi2-core
 
@@ -31,6 +33,14 @@ AT-SPI2 accessibility tree and reports the active application, window,
 focused widget and its text as text, JSON or YAML; streams accessibility
 events; and serves all of it as MCP tools for Claude Code and other clients.
 
+%package gtk
+Summary:        Control panel for camelot
+Requires:       %{name} = %{version}-%{release}
+
+%description gtk
+Control panel for camelot: recent activity, the recording switch, and
+settings, over the daemon's socket.
+
 %prep
 %autosetup
 
@@ -38,6 +48,7 @@ events; and serves all of it as MCP tools for Claude Code and other clients.
 shards install --production
 bin/gi-crystal
 crystal build --release --no-debug src/cli.cr -o bin/camelot
+crystal build --release --no-debug src/gtk.cr -o bin/camelot-gtk
 for sh in bash zsh fish; do bin/camelot --completions $sh > completions.$sh; done
 
 %install
@@ -46,6 +57,8 @@ install -Dpm0644 completions.bash %{buildroot}%{_datadir}/bash-completion/comple
 install -Dpm0644 completions.zsh  %{buildroot}%{_datadir}/zsh/site-functions/_camelot
 install -Dpm0644 completions.fish %{buildroot}%{_datadir}/fish/vendor_completions.d/camelot.fish
 install -Dpm0644 contrib/camelot.service %{buildroot}%{_userunitdir}/camelot.service
+install -Dpm0755 bin/camelot-gtk %{buildroot}%{_bindir}/camelot-gtk
+install -Dpm0644 contrib/com.tabcomputing.Camelot.desktop %{buildroot}%{_datadir}/applications/com.tabcomputing.Camelot.desktop
 install -Dpm0644 README.md %{buildroot}%{_docdir}/%{name}/README.md
 install -Dpm0644 LICENSE %{buildroot}%{_licensedir}/%{name}/LICENSE
 
@@ -57,6 +70,10 @@ install -Dpm0644 LICENSE %{buildroot}%{_licensedir}/%{name}/LICENSE
 %{_datadir}/zsh/site-functions/_camelot
 %{_datadir}/fish/vendor_completions.d/camelot.fish
 %{_userunitdir}/camelot.service
+
+%files gtk
+%{_bindir}/camelot-gtk
+%{_datadir}/applications/com.tabcomputing.Camelot.desktop
 
 %changelog
 * Mon Sep 21 2026 Thomas Sawyer <transfire@gmail.com> - 0.2.0-1

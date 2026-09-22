@@ -9,11 +9,11 @@ module Camelot
   # then dispatched, with output captured.
   module Commands
     # Commands that only the daemon can answer.
-    DAEMON_ONLY = %w[recent status pause resume reload]
+    DAEMON_ONLY = %w[recent status pause resume reload subscribe]
     # Commands that are never forwarded or exposed as tools.
     LOCAL_ONLY = %w[mcp watch daemon]
     # User controls over the daemon: not offered to an AI as tools.
-    CONTROL = %w[pause resume reload]
+    CONTROL = %w[pause resume reload subscribe]
 
     # Run `name` with `args`. Forwards to a running daemon unless `local`.
     def self.run(cli : Jargon::CLI, name : String, args : JSON::Any, local : Bool = false) : {String, Bool}

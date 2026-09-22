@@ -2,7 +2,7 @@ Source: camelot
 Section: utils
 Priority: optional
 Maintainer: trans <transfire@gmail.com>
-Build-Depends: debhelper-compat (= 13), crystal, build-essential, git, libgirepository1.0-dev, gir1.2-atspi-2.0, libatspi2.0-dev, libglib2.0-dev, libdbus-1-dev, libgc-dev, libpcre2-dev, libyaml-dev, zlib1g-dev
+Build-Depends: debhelper-compat (= 13), crystal, build-essential, git, libgirepository1.0-dev, gir1.2-atspi-2.0, libatspi2.0-dev, libglib2.0-dev, libdbus-1-dev, libgc-dev, libpcre2-dev, libyaml-dev, zlib1g-dev, libgtk-4-dev, libadwaita-1-dev, gir1.2-gtk-4.0, gir1.2-adw-1
 Standards-Version: 4.6.0
 Homepage: https://github.com/tabcomputing/camelot
 
@@ -14,3 +14,10 @@ Description: Context bridge between the Linux desktop and AI
  AT-SPI2 accessibility tree and reports the active application, window,
  focused widget and its text as text, JSON or YAML; streams accessibility
  events; and serves all of it as MCP tools for Claude Code and other clients.
+
+Package: camelot-gtk
+Architecture: amd64
+Depends: ${shlibs:Depends}, ${misc:Depends}, camelot (= ${binary:Version})
+Description: Control panel for camelot
+ Recent activity, the recording switch and settings, over the camelot
+ daemon's socket. A GTK4/libadwaita application.

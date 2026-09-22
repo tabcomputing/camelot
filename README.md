@@ -33,12 +33,13 @@ To build them yourself from `pkg/`:
 
 ```sh
 just pkg-arch && sudo pacman -U pkg/camelot-*.pkg.tar.zst
-just pkg-deb  && sudo apt install ./pkg/camelot_*.deb
+just pkg-deb  && sudo apt install ./pkg/camelot_*.deb ./pkg/camelot-gtk_*.deb
 just pkg-rpm  && sudo dnf install pkg/camelot-*.x86_64.rpm
 ```
 
 (`pkg-deb` and `pkg-rpm` build inside podman containers, so they work from
-any distro.) Each installs `camelot` plus bash/zsh/fish completions.
+any distro.) `camelot` installs the CLI, daemon, systemd user unit and
+bash/zsh/fish completions; `camelot-gtk` adds the control panel.
 `just test-install` installs the deb and rpm into fresh containers to
 check their runtime dependencies.
 
@@ -67,6 +68,7 @@ camelot daemon               # background service: warm bus, activity history
 camelot recent               # what the user has been doing (needs the daemon)
 camelot status               # is the daemon up, what does it hold
 camelot mcp                  # serve all of the above as MCP tools (stdio)
+camelot-gtk                  # the control panel (separate package)
 ```
 
 Every command takes `-f json|yaml|text` (`text` is the default). Snapshot
@@ -241,6 +243,25 @@ Ignored applications are reported as a redacted shell (role and name only)
 by every command, and the daemon records nothing from them. `text: false`
 keeps `recent` working (which widget, how many edits, over how long) but
 drops the "last …" snippet of what was typed.
+
+## The panel: `camelot-gtk`
+
+A small GTK4/libadwaita window over the daemon — the place to see what is
+being recorded and to change it without editing YAML:
+
+- **Recording switch** in the header, and a banner when the daemon is not
+  running or recording is paused (with the Start/Resume button right there).
+- **Activity**: the `recent` digest as a live list — pushed by the daemon,
+  never polled — with a time-window selector.
+- **Settings**: start/stop the daemon; record typed text; how long to keep
+  history; the durable log; browser accessibility; and the ignore list with
+  a "choose a running application" picker. Every change is written to the
+  config file and the daemon reloads it in place.
+
+It is a separate package (`camelot-gtk`) so a machine running only the
+daemon needs no GTK. GTK's main loop is driven by the same `Events::Pump`
+the daemon uses, so the panel's socket subscription is an ordinary Crystal
+fiber alongside the toolkit.
 
 ## MCP
 

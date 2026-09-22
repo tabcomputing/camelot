@@ -210,7 +210,7 @@ module Camelot
     def self.ancestry(acc : Atspi::Accessible) : Array(Atspi::Accessible)
       chain = [acc]
       current = acc
-      while parent = safe(nil) { current.parent }
+      while parent = parent?(current)
         break if safe("") { parent.role_name } == "desktop frame"
         chain.unshift(parent)
         current = parent
@@ -232,7 +232,7 @@ module Camelot
 
     # On the user's ignore list (by application name)?
     def self.ignored?(acc : Atspi::Accessible) : Bool
-      Config.ignored?(safe(nil) { acc.application.name })
+      Config.ignored?(application?(acc).try { |a| safe(nil) { a.name } })
     end
 
     # Role and name only: what an ignored application looks like.
@@ -314,7 +314,7 @@ module Camelot
 
     def self.children(acc : Atspi::Accessible) : Array(Atspi::Accessible)
       count = safe(0) { acc.child_count }
-      (0...count).compact_map { |i| safe(nil) { acc.child_at_index(i) } }
+      (0...count).compact_map { |i| child_at_index?(acc, i) }
     end
 
     # Index path of `acc` below its application ("" for the application itself).
@@ -375,6 +375,21 @@ module Camelot
     end
 
     # ---- Helpers -------------------------------------------------------------
+
+    # Object-returning lookups, called raw: libatspi answers NULL (with or
+    # without a GError) for a child that vanished or an app whose cache is
+    # broken, and the generated wrappers dereference that NULL.
+    {% for name in %w[child_at_index parent application] %}
+      def self.{{name.id}}?(acc : Atspi::Accessible{% if name == "child_at_index" %}, index : Int32{% end %}) : Atspi::Accessible?
+        error = Pointer(LibGLib::Error).null
+        ptr = LibAtspi.atspi_accessible_get_{{name.id}}(acc.to_unsafe, {% if name == "child_at_index" %}index, {% end %}pointerof(error))
+        unless error.null?
+          LibGLib.g_error_free(error)
+          return nil
+        end
+        ptr.null? ? nil : Atspi::Accessible.new(ptr, GICrystal::Transfer::Full)
+      end
+    {% end %}
 
     # Interface lookups that work across libatspi versions: the `is_*`
     # predicates only exist from 2.5x on, while `get_*_iface` (NULL when the

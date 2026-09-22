@@ -40,7 +40,16 @@ module Camelot
       end
 
       def self.to_yaml(value : Time::Span, yaml : YAML::Nodes::Builder)
-        yaml.scalar("#{value.total_seconds.to_i}s")
+        yaml.scalar(format(value))
+      end
+
+      # The largest unit that divides evenly: 1800s -> "30m".
+      def self.format(value : Time::Span) : String
+        secs = value.total_seconds.to_i64
+        {86400 => "d", 3600 => "h", 60 => "m"}.each do |unit, suffix|
+          return "#{secs // unit}#{suffix}" if secs > 0 && secs % unit == 0
+        end
+        "#{secs}s"
       end
 
       def self.parse(raw : String) : Time::Span?
@@ -71,6 +80,12 @@ module Camelot
     end
 
     class Error < Exception; end
+
+    # Write back to the config file (creating the directory).
+    def save(path : String = Config.path) : Nil
+      Dir.mkdir_p(File.dirname(path))
+      File.write(path, to_yaml, perm: 0o600)
+    end
 
     # The loaded configuration, read once per process.
     class_property current : Config { load }

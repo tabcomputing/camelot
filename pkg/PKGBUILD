@@ -1,5 +1,6 @@
 # Maintainer: trans <transfire@gmail.com>
-pkgname=camelot
+pkgbase=camelot
+pkgname=(camelot camelot-gtk)
 pkgver=0.2.0
 pkgrel=1
 pkgdesc="Context bridge between the Linux desktop and AI: AT-SPI snapshots, event stream, MCP tools"
@@ -22,9 +23,10 @@ makedepends=(
   'git'               # shards fetches dependencies from GitHub
   'libgirepository'               # gi-crystal's generator reads typelibs...
   'gobject-introspection-runtime' # ...including DBus-1.0, which Atspi depends on
+  'gtk4'
+  'libadwaita'
 )
 options=('!debug')  # built with --no-debug; nothing to split out
-install=camelot.install
 source=("${pkgname}-${pkgver}.tar.gz")
 sha256sums=('SKIP')
 
@@ -33,16 +35,28 @@ build() {
   shards install --production
   bin/gi-crystal            # generate Atspi bindings from the system typelib
   crystal build --release --no-debug src/cli.cr -o bin/camelot
+  crystal build --release --no-debug src/gtk.cr -o bin/camelot-gtk
   for sh in bash zsh fish; do bin/camelot --completions $sh > "completions.$sh"; done
 }
 
-package() {
-  cd "${pkgname}-${pkgver}"
+package_camelot() {
+  pkgdesc="Context bridge between the Linux desktop and AI: AT-SPI snapshots, daemon, MCP tools"
+  install=camelot.install
+  cd "${pkgbase}-${pkgver}"
   install -Dm755 bin/camelot "${pkgdir}/usr/bin/camelot"
   install -Dm644 completions.bash "${pkgdir}/usr/share/bash-completion/completions/camelot"
   install -Dm644 completions.zsh  "${pkgdir}/usr/share/zsh/site-functions/_camelot"
   install -Dm644 completions.fish "${pkgdir}/usr/share/fish/vendor_completions.d/camelot.fish"
   install -Dm644 contrib/camelot.service "${pkgdir}/usr/lib/systemd/user/camelot.service"
-  install -Dm644 README.md "${pkgdir}/usr/share/doc/${pkgname}/README.md"
-  install -Dm644 LICENSE "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+  install -Dm644 README.md "${pkgdir}/usr/share/doc/${pkgbase}/README.md"
+  install -Dm644 LICENSE "${pkgdir}/usr/share/licenses/${pkgbase}/LICENSE"
+}
+
+package_camelot-gtk() {
+  pkgdesc="Control panel for camelot: activity, recording switch, settings"
+  depends=('camelot' 'gtk4' 'libadwaita')
+  cd "${pkgbase}-${pkgver}"
+  install -Dm755 bin/camelot-gtk "${pkgdir}/usr/bin/camelot-gtk"
+  install -Dm644 contrib/com.tabcomputing.Camelot.desktop "${pkgdir}/usr/share/applications/com.tabcomputing.Camelot.desktop"
+  install -Dm644 LICENSE "${pkgdir}/usr/share/licenses/camelot-gtk/LICENSE"
 }

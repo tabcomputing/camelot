@@ -12,6 +12,8 @@ authors:
 targets:
   camelot:
     main: src/cli.cr
+  camelot-gtk:
+    main: src/gtk.cr
 
 crystal: '>= 1.21.0'
 
@@ -24,3 +26,8 @@ dependencies:
   gi-crystal:
     github: hugopl/gi-crystal
     version: ">= 0.15.2"
+  gtk4:
+    github: hugopl/gtk4.cr
+    version: ">= 0.18.0"
+  libadwaita:
+    github: hugopl/libadwaita.cr

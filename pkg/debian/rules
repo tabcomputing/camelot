@@ -7,6 +7,7 @@ override_dh_auto_build:
 	shards install --production
 	bin/gi-crystal
 	crystal build --release --no-debug src/cli.cr -o bin/camelot
+	crystal build --release --no-debug src/gtk.cr -o bin/camelot-gtk
 	for sh in bash zsh fish; do bin/camelot --completions $$sh > completions.$$sh; done
 
 override_dh_auto_install:
@@ -15,6 +16,8 @@ override_dh_auto_install:
 	install -Dm644 completions.zsh  debian/camelot/usr/share/zsh/vendor-completions/_camelot
 	install -Dm644 completions.fish debian/camelot/usr/share/fish/vendor_completions.d/camelot.fish
 	install -Dm644 contrib/camelot.service debian/camelot/usr/lib/systemd/user/camelot.service
+	install -Dm755 bin/camelot-gtk debian/camelot-gtk/usr/bin/camelot-gtk
+	install -Dm644 contrib/com.tabcomputing.Camelot.desktop debian/camelot-gtk/usr/share/applications/com.tabcomputing.Camelot.desktop
 
 override_dh_auto_test:
 	true
