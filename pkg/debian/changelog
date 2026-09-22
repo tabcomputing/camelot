@@ -1,3 +1,9 @@
+camelot (0.3.0-1) unstable; urgency=medium
+
+  * Control panel (camelot-gtk): switchboard, activity log, ignore list; push protocol (subscribe); incremental digest; event resolution off the dispatch path; per-source cache
+
+ -- Thomas Sawyer <transfire@gmail.com>  Mon, 21 Sep 2026 22:58:12 -0400
+
 camelot (0.2.0-1) unstable; urgency=medium
 
   * Daemon with activity history (recent), pause/resume/reload, ignore list, retention, durable log; accessibility on by default

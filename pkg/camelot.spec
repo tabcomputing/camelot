@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 
 Name:           camelot
-Version:        0.2.0
+Version:        0.3.0
 Release:        1%{?dist}
 Summary:        Context bridge between the Linux desktop and AI
 
@@ -76,6 +76,9 @@ install -Dpm0644 LICENSE %{buildroot}%{_licensedir}/%{name}/LICENSE
 %{_datadir}/applications/com.tabcomputing.Camelot.desktop
 
 %changelog
+* Mon Sep 21 2026 Thomas Sawyer <transfire@gmail.com> - 0.3.0-1
+- Control panel (camelot-gtk): switchboard, activity log, ignore list; push protocol (subscribe); incremental digest; event resolution off the dispatch path; per-source cache
+
 * Mon Sep 21 2026 Thomas Sawyer <transfire@gmail.com> - 0.2.0-1
 - Daemon with activity history (recent), pause/resume/reload, ignore list, retention, durable log; accessibility on by default
 

@@ -1,7 +1,7 @@
 # Maintainer: trans <transfire@gmail.com>
 pkgbase=camelot
 pkgname=(camelot camelot-gtk)
-pkgver=0.2.0
+pkgver=0.3.0
 pkgrel=1
 pkgdesc="Context bridge between the Linux desktop and AI: AT-SPI snapshots, event stream, MCP tools"
 arch=('x86_64')
