@@ -1,3 +1,9 @@
+camelot (0.2.0-1) unstable; urgency=medium
+
+  * Daemon with activity history (recent), pause/resume/reload, ignore list, retention, durable log; accessibility on by default
+
+ -- Thomas Sawyer <transfire@gmail.com>  Mon, 21 Sep 2026 20:28:05 -0400
+
 camelot (0.1.0-1) unstable; urgency=medium
 
   * Initial packaging: AT-SPI snapshots (apps, windows, tree, focus, at,

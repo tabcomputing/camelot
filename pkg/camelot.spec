@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 
 Name:           camelot
-Version:        0.1.0
+Version:        0.2.0
 Release:        1%{?dist}
 Summary:        Context bridge between the Linux desktop and AI
 
@@ -60,6 +60,9 @@ install -Dpm0644 LICENSE %{buildroot}%{_licensedir}/%{name}/LICENSE
 %{_userunitdir}/camelot.service
 
 %changelog
+* Mon Sep 21 2026 Thomas Sawyer <transfire@gmail.com> - 0.2.0-1
+- Daemon with activity history (recent), pause/resume/reload, ignore list, retention, durable log; accessibility on by default
+
 * Mon Sep 21 2026 Thomas Sawyer <transfire@gmail.com> - 0.1.0-1
 - Initial packaging: AT-SPI snapshots (apps, windows, tree, focus, at, context),
   event stream (watch), MCP server (mcp), shell completions.
