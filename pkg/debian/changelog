@@ -1,3 +1,9 @@
+camelot (0.3.1-1) unstable; urgency=medium
+
+  * Fix a daemon that spun a core when left running: the GLib pump now always yields, bounds dispatch, and retires watchers for dead connections
+
+ -- Thomas Sawyer <transfire@gmail.com>  Tue, 22 Sep 2026 09:46:20 -0400
+
 camelot (0.3.0-1) unstable; urgency=medium
 
   * Control panel (camelot-gtk): switchboard, activity log, ignore list; push protocol (subscribe); incremental digest; event resolution off the dispatch path; per-source cache
