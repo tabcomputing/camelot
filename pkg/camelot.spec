@@ -46,7 +46,7 @@ settings, over the daemon's socket.
 
 %build
 shards install --production
-bin/gi-crystal
+bin/gi-crystal > gi-crystal.log 2>&1 || { cat gi-crystal.log; exit 1; }
 crystal build --release --no-debug src/cli.cr -o bin/camelot
 crystal build --release --no-debug src/gtk.cr -o bin/camelot-gtk
 for sh in bash zsh fish; do bin/camelot --completions $sh > completions.$sh; done

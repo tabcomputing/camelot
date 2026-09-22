@@ -2,9 +2,10 @@ require "./link"
 
 module Camelot
   module Gtk
-    # The control panel window: a status header with the recording
-    # switch, an Activity page fed by the daemon's push stream, and a
-    # Settings page that writes the config file and reloads the daemon.
+    # The control panel. The front page is a switchboard: what is being
+    # recorded, one switch per capability, with the daemon itself as the
+    # first row. The activity log and the ignore list are pages behind it —
+    # the user knows what they are doing; the record is there when wanted.
     class Panel
       RETENTIONS = [
         {"5 minutes", 5.minutes}, {"15 minutes", 15.minutes}, {"30 minutes", 30.minutes},
@@ -14,109 +15,162 @@ module Camelot
 
       @window : Adw::ApplicationWindow
       @toasts : Adw::ToastOverlay
-      @banner : Adw::Banner
-      @recording : ::Gtk::Switch
-      @status_label : ::Gtk::Label
-      @activity_group : Adw::PreferencesGroup
+      @nav : Adw::NavigationView
+      # switchboard rows
+      @daemon_row : Adw::SwitchRow
+      @recording_row : Adw::SwitchRow
+      @text_row : Adw::SwitchRow
+      @retention_row : Adw::ComboRow
+      @log_row : Adw::SwitchRow
+      @a11y_row : Adw::SwitchRow
+      @ignore_nav : Adw::ActionRow
+      @activity_nav : Adw::ActionRow
+      # activity page
       @activity_list : ::Gtk::ListBox
       @activity_empty : Adw::ActionRow
       @digest = History::Digest.new
       @rows = {} of History::Entry => Adw::ActionRow
       @window_secs = 300
+      # ignore page
       @ignore_group : Adw::PreferencesGroup
       @ignore_rows = [] of ::Gtk::Widget
-      @daemon_row : Adw::ActionRow
-      @daemon_button : ::Gtk::Button
       @syncing = false
 
       def initialize(app : Adw::Application, @link : Link, @config : Config)
         @window = Adw::ApplicationWindow.new(app)
         @window.title = "Camelot"
-        @window.set_default_size(520, 680)
+        @window.set_default_size(480, 720)
         @toasts = Adw::ToastOverlay.new
+        @nav = Adw::NavigationView.new
 
-        # ---- header: title switcher + recording switch ----
-        stack = Adw::ViewStack.new
-        switcher = Adw::ViewSwitcher.new
-        switcher.stack = stack
-        switcher.policy = Adw::ViewSwitcherPolicy::Wide
-        header = Adw::HeaderBar.new
-        header.title_widget = switcher
-
-        @recording = ::Gtk::Switch.new
-        @recording.valign = ::Gtk::Align::Center
-        @recording.tooltip_text = "Recording — switch off to pause"
-        @recording.notify_signal["active"].connect { toggle_recording }
-        rec_box = ::Gtk::Box.new(::Gtk::Orientation::Horizontal, 6)
-        rec_label = ::Gtk::Label.new("Recording")
-        rec_label.add_css_class("dim-label")
-        rec_box.append(rec_label)
-        rec_box.append(@recording)
-        header.pack_end(rec_box)
-
-        # ---- banner for "not running" / "paused" ----
-        @banner = Adw::Banner.new("")
-        @banner.button_clicked_signal.connect { banner_action }
-
-        # ---- pages ----
-        @status_label = ::Gtk::Label.new("")
-        @activity_group = Adw::PreferencesGroup.new
+        @daemon_row = Adw::SwitchRow.new
+        @recording_row = Adw::SwitchRow.new
+        @text_row = Adw::SwitchRow.new
+        @retention_row = Adw::ComboRow.new
+        @log_row = Adw::SwitchRow.new
+        @a11y_row = Adw::SwitchRow.new
+        @ignore_nav = Adw::ActionRow.new
+        @activity_nav = Adw::ActionRow.new
         @activity_list = ::Gtk::ListBox.new
         @activity_empty = Adw::ActionRow.new
         @ignore_group = Adw::PreferencesGroup.new
-        @daemon_row = Adw::ActionRow.new
-        @daemon_button = ::Gtk::Button.new_with_label("Start")
 
-        stack.add_titled_with_icon(activity_page, "activity", "Activity", "view-list-symbolic")
-        stack.add_titled_with_icon(settings_page, "settings", "Settings", "emblem-system-symbolic")
-
-        body = ::Gtk::Box.new(::Gtk::Orientation::Vertical, 0)
-        body.append(@banner)
-        body.append(stack)
-        stack.vexpand = true
-
-        view = Adw::ToolbarView.new
-        view.add_top_bar(header)
-        view.content = body
-        @toasts.child = view
+        @nav.add(page("Camelot", switchboard))
+        @toasts.child = @nav
         @window.content = @toasts
 
         @link.on_change = ->(what : Symbol) { changed(what) }
         @link.on_event = ->(e : Events::Event) { fold(e) }
         refresh_state
         rebuild_activity
+        rebuild_ignore
       end
 
       def present : Nil
         @window.present
       end
 
+      private def page(title : String, content : ::Gtk::Widget) : Adw::NavigationPage
+        view = Adw::ToolbarView.new
+        view.add_top_bar(Adw::HeaderBar.new)
+        view.content = content
+        Adw::NavigationPage.new(child: view, title: title)
+      end
+
+      # ---- Switchboard ----------------------------------------------------------
+
+      private def switchboard : ::Gtk::Widget
+        pg = Adw::PreferencesPage.new
+
+        service = Adw::PreferencesGroup.new
+        @daemon_row.title = "Background service"
+        @daemon_row.notify_signal["active"].connect { toggle_daemon }
+        service.add(@daemon_row)
+        pg.add(service)
+
+        rec = Adw::PreferencesGroup.new
+        rec.title = "Recording"
+        rec.description = "In memory, readable only by you, gone when the service stops."
+
+        @recording_row.title = "Activity"
+        @recording_row.subtitle = "Window switches, focus changes, edits"
+        @recording_row.notify_signal["active"].connect { toggle_recording }
+        rec.add(@recording_row)
+
+        @text_row.title = "Typed text"
+        @text_row.subtitle = "Off: which field and how much, not what"
+        @text_row.active = @config.text
+        @text_row.notify_signal["active"].connect { save { @config.text = @text_row.active? } }
+        rec.add(@text_row)
+
+        @retention_row.title = "Keep for"
+        labels = RETENTIONS.map(&.[0])
+        current = RETENTIONS.index { |_, span| span == @config.retention }
+        unless current
+          labels << Config::Duration.format(@config.retention)
+          current = labels.size - 1
+        end
+        @retention_row.model = ::Gtk::StringList.new(labels)
+        @retention_row.selected = current.to_u32
+        @retention_row.notify_signal["selected"].connect do
+          i = @retention_row.selected.to_i
+          save { @config.retention = RETENTIONS[i][1] } if i < RETENTIONS.size
+        end
+        rec.add(@retention_row)
+
+        @log_row.title = "Durable log"
+        @log_row.subtitle = "Append every event to #{Config.new.tap(&.log = true).log_dir}"
+        @log_row.active = @config.log != false
+        @log_row.notify_signal["active"].connect { save { @config.log = @log_row.active? } }
+        rec.add(@log_row)
+        pg.add(rec)
+
+        access = Adw::PreferencesGroup.new
+        access.title = "Access"
+        @a11y_row.title = "Browser accessibility"
+        @a11y_row.subtitle = "Turned on when the service starts; browsers need it at their start"
+        @a11y_row.active = @config.accessibility
+        @a11y_row.notify_signal["active"].connect { save { @config.accessibility = @a11y_row.active? } }
+        access.add(@a11y_row)
+
+        @ignore_nav.title = "Ignored applications"
+        @ignore_nav.activatable = true
+        @ignore_nav.add_suffix(::Gtk::Image.new_from_icon_name("go-next-symbolic"))
+        @ignore_nav.activated_signal.connect { @nav.push(page("Ignored applications", ignore_page)) }
+        access.add(@ignore_nav)
+        pg.add(access)
+
+        more = Adw::PreferencesGroup.new
+        @activity_nav.title = "Activity log"
+        @activity_nav.activatable = true
+        @activity_nav.add_suffix(::Gtk::Image.new_from_icon_name("go-next-symbolic"))
+        @activity_nav.activated_signal.connect { @nav.push(page("Activity", activity_page)) }
+        more.add(@activity_nav)
+        pg.add(more)
+
+        pg
+      end
+
       # ---- Activity page --------------------------------------------------------
 
       private def activity_page : ::Gtk::Widget
-        page = Adw::PreferencesPage.new
-
-        top = Adw::PreferencesGroup.new
-        @status_label.xalign = 0
-        @status_label.wrap = true
-        @status_label.add_css_class("dim-label")
-        top.add(@status_label)
-        page.add(top)
-
+        pg = Adw::PreferencesPage.new
+        group = Adw::PreferencesGroup.new
         range = ::Gtk::DropDown.new_from_strings(WINDOWS.map(&.[0]))
-        range.selected = 1
+        range.selected = WINDOWS.index { |_, secs| secs == @window_secs }.try(&.to_u32) || 1_u32
         range.valign = ::Gtk::Align::Center
         range.notify_signal["selected"].connect do
           @window_secs = WINDOWS[range.selected][1]
           rebuild_activity
         end
-        @activity_group.title = "What you've been doing"
-        @activity_group.header_suffix = range
+        group.title = "What you've been doing"
+        group.header_suffix = range
+        @activity_list.parent.try { |p| p.as(Adw::PreferencesGroup).remove(@activity_list) }
         @activity_list.add_css_class("boxed-list")
         @activity_list.selection_mode = ::Gtk::SelectionMode::None
-        @activity_group.add(@activity_list)
-        page.add(@activity_group)
-        page
+        group.add(@activity_list)
+        pg.add(group)
+        pg
       end
 
       # One pushed event: fold it, then touch exactly one row.
@@ -135,6 +189,7 @@ module Camelot
           end
         end
         placeholder
+        refresh_counts
       end
 
       # Re-derive the list from the local history: on a window change or
@@ -156,7 +211,7 @@ module Camelot
 
       private def placeholder : Nil
         if @rows.empty?
-          @activity_empty.title = @link.connected? ? "No activity in this window" : "Start the daemon to see activity"
+          @activity_empty.title = @link.connected? ? "No activity in this window" : "Start the service to see activity"
           @activity_empty.add_css_class("dim-label")
           @activity_list.append(@activity_empty) unless @activity_empty.parent
         elsif @activity_empty.parent
@@ -167,7 +222,7 @@ module Camelot
       private def row_for(e : History::Entry) : Adw::ActionRow
         row = Adw::ActionRow.new
         widget = e.name ? "#{e.role} “#{e.name}”" : (e.role || "?")
-        row.title = "#{e.app}: #{widget}".gsub("&", "&amp;").gsub("<", "&lt;")
+        row.title = escape("#{e.app}: #{widget}")
         row.subtitle = subtitle_for(e)
         icon = case e.kind
                when "window" then "window-symbolic"
@@ -181,7 +236,7 @@ module Camelot
       end
 
       private def subtitle_for(e : History::Entry) : String
-        String.build do |s|
+        escape(String.build do |s|
           s << e.time.to_s("%H:%M:%S") << "  " << e.kind
           s << " ×" << e.count if e.count > 1
           if (u = e.until) && e.count > 1
@@ -190,92 +245,38 @@ module Camelot
           if t = e.text
             s << "  “" << t << "”"
           end
-        end.gsub("&", "&amp;").gsub("<", "&lt;")
+        end)
       end
 
-      # ---- Settings page --------------------------------------------------------
+      # ---- Ignore page ----------------------------------------------------------
 
-      private def settings_page : ::Gtk::Widget
-        page = Adw::PreferencesPage.new
-
-        # Daemon
-        daemon = Adw::PreferencesGroup.new
-        daemon.title = "Daemon"
-        @daemon_row.title = "Background service"
-        @daemon_button.valign = ::Gtk::Align::Center
-        @daemon_button.clicked_signal.connect { daemon_action }
-        @daemon_row.add_suffix(@daemon_button)
-        daemon.add(@daemon_row)
-        page.add(daemon)
-
-        # Recording
-        rec = Adw::PreferencesGroup.new
-        rec.title = "Recording"
-        rec.description = "Kept in memory only, readable only by you. Nothing is written to disk unless the log is on."
-
-        text = Adw::SwitchRow.new
-        text.title = "Record typed text"
-        text.subtitle = "Off: remember which field you edited and how much, not what you typed"
-        text.active = @config.text
-        text.notify_signal["active"].connect { save { @config.text = text.active? } }
-        rec.add(text)
-
-        retention = Adw::ComboRow.new
-        retention.title = "Keep history for"
-        labels = RETENTIONS.map(&.[0])
-        current = RETENTIONS.index { |_, span| span == @config.retention }
-        unless current
-          labels << Config::Duration.format(@config.retention)
-          current = labels.size - 1
-        end
-        retention.model = ::Gtk::StringList.new(labels)
-        retention.selected = current.to_u32
-        retention.notify_signal["selected"].connect do
-          i = retention.selected.to_i
-          save { @config.retention = RETENTIONS[i][1] } if i < RETENTIONS.size
-        end
-        rec.add(retention)
-
-        log = Adw::SwitchRow.new
-        log.title = "Durable log"
-        log.subtitle = "Append every recorded event to #{Config.new.tap(&.log = true).log_dir}"
-        log.active = @config.log != false
-        log.notify_signal["active"].connect { save { @config.log = log.active? } }
-        rec.add(log)
-
-        a11y = Adw::SwitchRow.new
-        a11y.title = "Turn on browser accessibility at start"
-        a11y.subtitle = "Browsers only expose page content when this was on when they started"
-        a11y.active = @config.accessibility
-        a11y.notify_signal["active"].connect { save { @config.accessibility = a11y.active? } }
-        rec.add(a11y)
-        page.add(rec)
-
-        # Ignore list
-        @ignore_group.title = "Ignored applications"
+      private def ignore_page : ::Gtk::Widget
+        pg = Adw::PreferencesPage.new
+        @ignore_group.parent.try { |p| p.as(Adw::PreferencesPage).remove(@ignore_group) }
         @ignore_group.description = "Never snapshotted, never recorded. Case-insensitive; * matches anything."
-        add = Adw::EntryRow.new
-        add.title = "Add an application name or pattern"
-        add.show_apply_button = true
-        add.apply_signal.connect do
-          pattern = add.text.strip
+        pg.add(@ignore_group)
+
+        add = Adw::PreferencesGroup.new
+        entry = Adw::EntryRow.new
+        entry.title = "Add a name or pattern"
+        entry.show_apply_button = true
+        entry.apply_signal.connect do
+          pattern = entry.text.strip
           unless pattern.empty? || @config.ignore.includes?(pattern)
             save { @config.ignore << pattern }
             rebuild_ignore
           end
-          add.text = ""
+          entry.text = ""
         end
-        @ignore_group.add(add)
-        pick = Adw::ActionRow.new # (ButtonRow needs libadwaita 1.6)
+        add.add(entry)
+        pick = Adw::ActionRow.new
         pick.title = "Choose a running application…"
         pick.activatable = true
         pick.add_prefix(::Gtk::Image.new_from_icon_name("list-add-symbolic"))
         pick.activated_signal.connect { pick_application }
-        @ignore_group.add(pick)
-        rebuild_ignore
-        page.add(@ignore_group)
-
-        page
+        add.add(pick)
+        pg.add(add)
+        pg
       end
 
       private def rebuild_ignore : Nil
@@ -283,7 +284,7 @@ module Camelot
         @ignore_rows.clear
         @config.ignore.each do |pattern|
           row = Adw::ActionRow.new
-          row.title = pattern.gsub("&", "&amp;").gsub("<", "&lt;")
+          row.title = escape(pattern)
           remove = ::Gtk::Button.new_from_icon_name("user-trash-symbolic")
           remove.valign = ::Gtk::Align::Center
           remove.add_css_class("flat")
@@ -295,6 +296,14 @@ module Camelot
           @ignore_group.add(row)
           @ignore_rows << row
         end
+        if @config.ignore.empty?
+          row = Adw::ActionRow.new
+          row.title = "Nothing ignored"
+          row.add_css_class("dim-label")
+          @ignore_group.add(row)
+          @ignore_rows << row
+        end
+        @ignore_nav.subtitle = @config.ignore.empty? ? "None" : escape(@config.ignore.join(", "))
       end
 
       private def pick_application : Nil
@@ -312,7 +321,7 @@ module Camelot
         list.selection_mode = ::Gtk::SelectionMode::None
         apps.each do |name|
           row = Adw::ActionRow.new
-          row.title = name.gsub("&", "&amp;").gsub("<", "&lt;")
+          row.title = escape(name)
           row.activatable = true
           list.append(row)
         end
@@ -343,49 +352,47 @@ module Camelot
       private def refresh_state : Nil
         @syncing = true
         st = @link.status
+        @daemon_row.active = !st.nil?
         if st
-          @recording.sensitive = true
-          @recording.active = !@link.paused?
-          if p = st.paused_since
-            @banner.title = "Recording paused since #{p.to_s("%H:%M")}"
-            @banner.button_label = "Resume"
-            @banner.revealed = true
-          else
-            @banner.revealed = false
-          end
-          @status_label.text = String.build do |s|
-            s << "Daemon up since " << st.started.to_s("%H:%M") << " · "
-            s << st.events << " events in the last " << Config::Duration.format(st.retention_seconds.seconds)
-            s << " · typed text not recorded" unless st.text
-            s << "\nLogging to " << st.log_dir if st.log_dir
-          end
-          @daemon_row.subtitle = "Running (pid #{st.pid})"
-          @daemon_button.label = "Stop"
+          @daemon_row.subtitle = "Running since #{st.started.to_s("%H:%M")} · pid #{st.pid}"
+          @recording_row.sensitive = true
+          @recording_row.active = !@link.paused?
+          @recording_row.subtitle = if p = st.paused_since
+                                      "Paused since #{p.to_s("%H:%M")}"
+                                    else
+                                      "Window switches, focus changes, edits"
+                                    end
+          @log_row.subtitle = st.log_dir ? "Logging to #{st.log_dir} since #{st.log_since.try(&.to_s("%H:%M"))}" : "Append every event to #{Config.new.tap(&.log = true).log_dir}"
         else
-          @recording.active = false
-          @recording.sensitive = false
-          @banner.title = "The daemon is not running — nothing is being recorded"
-          @banner.button_label = "Start"
-          @banner.revealed = true
-          @status_label.text = ""
-          @daemon_row.subtitle = @link.unit_installed? ? "Stopped (systemd user unit installed)" : "Stopped"
-          @daemon_button.label = "Start"
+          @daemon_row.subtitle = @link.unit_installed? ? "Stopped — nothing is recorded" : "Stopped — nothing is recorded (no systemd unit; will run as a child)"
+          @recording_row.sensitive = false
+          @recording_row.active = false
+          @recording_row.subtitle = "Window switches, focus changes, edits"
         end
+        refresh_counts
         @syncing = false
+      end
+
+      private def refresh_counts : Nil
+        if st = @link.status
+          @activity_nav.subtitle = "#{@link.history.count} events in the last #{Config::Duration.format(st.retention_seconds.seconds)}"
+        else
+          @activity_nav.subtitle = "Service not running"
+        end
+      end
+
+      private def toggle_daemon : Nil
+        return if @syncing
+        error = @daemon_row.active? ? @link.start_daemon : @link.stop_daemon
+        if error
+          toast(error)
+          refresh_state
+        end
       end
 
       private def toggle_recording : Nil
         return if @syncing || !@link.connected?
-        @recording.active? ? @link.resume : @link.pause
-      end
-
-      private def banner_action : Nil
-        @link.connected? ? @link.resume : daemon_action
-      end
-
-      private def daemon_action : Nil
-        error = @link.connected? ? @link.stop_daemon : @link.start_daemon
-        toast(error) if error
+        @recording_row.active? ? @link.resume : @link.pause
       end
 
       # Persist a config change and tell the daemon.
@@ -395,7 +402,7 @@ module Camelot
         Config.current = @config
         if @link.connected?
           if error = @link.reload
-            toast("Daemon rejected the config: #{error}")
+            toast("Service rejected the config: #{error}")
           end
         end
       rescue ex : File::Error
@@ -404,6 +411,10 @@ module Camelot
 
       private def toast(message : String) : Nil
         @toasts.add_toast(Adw::Toast.new(title: message))
+      end
+
+      private def escape(text : String) : String
+        text.gsub("&", "&amp;").gsub("<", "&lt;")
       end
     end
 

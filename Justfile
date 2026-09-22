@@ -106,6 +106,8 @@ pkg-src:
 
 pkg-arch: pkg-src
     cd pkg && makepkg -f
+    # makepkg's extracted tree holds a second binding.yml that gi-crystal would trip over.
+    rm -rf pkg/src pkg/pkg
 
 # Arch package built in a container, for non-Arch hosts and CI.
 pkg-arch-container: pkg-src

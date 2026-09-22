@@ -246,22 +246,23 @@ drops the "last …" snippet of what was typed.
 
 ## The panel: `camelot-gtk`
 
-A small GTK4/libadwaita window over the daemon — the place to see what is
-being recorded and to change it without editing YAML:
+A small GTK4/libadwaita window over the daemon. The front page is a
+**switchboard** — what is being recorded, one switch per capability:
 
-- **Recording switch** in the header, and a banner when the daemon is not
-  running or recording is paused (with the Start/Resume button right there).
-- **Activity**: the `recent` digest as a live list — pushed by the daemon,
-  never polled — with a time-window selector.
-- **Settings**: start/stop the daemon; record typed text; how long to keep
-  history; the durable log; browser accessibility; and the ignore list with
-  a "choose a running application" picker. Every change is written to the
-  config file and the daemon reloads it in place.
+- **Background service** — start/stop the daemon (systemd user unit when
+  installed, otherwise a child process).
+- **Recording**: activity on/off (pause/resume), typed text, how long to
+  keep history, the durable log.
+- **Access**: browser accessibility; ignored applications (a page with a
+  "choose a running application" picker).
+- **Activity log** — a page with the `recent` digest as a live list,
+  pushed by the daemon and updated row by row, never polled. It is there
+  when you want it, not in your face.
 
-It is a separate package (`camelot-gtk`) so a machine running only the
-daemon needs no GTK. GTK's main loop is driven by the same `Events::Pump`
-the daemon uses, so the panel's socket subscription is an ordinary Crystal
-fiber alongside the toolkit.
+Every change is written to the config file and the daemon reloads it in
+place. It is a separate package (`camelot-gtk`) so a machine running only
+the daemon needs no GTK, and it is single-instance: launching it again
+raises the open window.
 
 ## MCP
 

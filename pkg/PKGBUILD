@@ -33,7 +33,9 @@ sha256sums=('SKIP')
 build() {
   cd "${pkgname}-${pkgver}"
   shards install --production
-  bin/gi-crystal            # generate Atspi bindings from the system typelib
+  # Generate the GObject bindings; the generator is chatty about corners of
+  # GTK we never touch, so its log is shown only if it fails.
+  bin/gi-crystal > gi-crystal.log 2>&1 || { cat gi-crystal.log; return 1; }
   crystal build --release --no-debug src/cli.cr -o bin/camelot
   crystal build --release --no-debug src/gtk.cr -o bin/camelot-gtk
   for sh in bash zsh fish; do bin/camelot --completions $sh > "completions.$sh"; done
