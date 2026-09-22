@@ -18,14 +18,16 @@ module Camelot
       @recording : ::Gtk::Switch
       @status_label : ::Gtk::Label
       @activity_group : Adw::PreferencesGroup
-      @activity_rows = [] of ::Gtk::Widget
+      @activity_list : ::Gtk::ListBox
+      @activity_empty : Adw::ActionRow
+      @digest = History::Digest.new
+      @rows = {} of History::Entry => Adw::ActionRow
       @window_secs = 300
       @ignore_group : Adw::PreferencesGroup
       @ignore_rows = [] of ::Gtk::Widget
       @daemon_row : Adw::ActionRow
       @daemon_button : ::Gtk::Button
       @syncing = false
-      @redraw = Channel(Nil).new(1)
 
       def initialize(app : Adw::Application, @link : Link, @config : Config)
         @window = Adw::ApplicationWindow.new(app)
@@ -59,6 +61,8 @@ module Camelot
         # ---- pages ----
         @status_label = ::Gtk::Label.new("")
         @activity_group = Adw::PreferencesGroup.new
+        @activity_list = ::Gtk::ListBox.new
+        @activity_empty = Adw::ActionRow.new
         @ignore_group = Adw::PreferencesGroup.new
         @daemon_row = Adw::ActionRow.new
         @daemon_button = ::Gtk::Button.new_with_label("Start")
@@ -78,8 +82,9 @@ module Camelot
         @window.content = @toasts
 
         @link.on_change = ->(what : Symbol) { changed(what) }
-        spawn(name: "camelot-gtk-redraw") { redraw_loop }
+        @link.on_event = ->(e : Events::Event) { fold(e) }
         refresh_state
+        rebuild_activity
       end
 
       def present : Nil
@@ -103,52 +108,89 @@ module Camelot
         range.valign = ::Gtk::Align::Center
         range.notify_signal["selected"].connect do
           @window_secs = WINDOWS[range.selected][1]
-          request_redraw
+          rebuild_activity
         end
         @activity_group.title = "What you've been doing"
         @activity_group.header_suffix = range
+        @activity_list.add_css_class("boxed-list")
+        @activity_list.selection_mode = ::Gtk::SelectionMode::None
+        @activity_group.add(@activity_list)
         page.add(@activity_group)
         page
       end
 
-      private def rebuild_activity : Nil
-        @activity_rows.each { |r| @activity_group.remove(r) }
-        @activity_rows.clear
-        entries = @link.connected? ? @link.history.recent(Time.local - @window_secs.seconds, 200) : [] of History::Entry
-        if entries.empty?
-          row = Adw::ActionRow.new
-          row.title = @link.connected? ? "No activity in this window" : "Start the daemon to see activity"
-          row.add_css_class("dim-label")
-          @activity_group.add(row)
-          @activity_rows << row
-          return
-        end
-        entries.reverse_each do |e|
-          row = Adw::ActionRow.new
-          widget = e.name ? "#{e.role} “#{e.name}”" : (e.role || "?")
-          row.title = "#{e.app}: #{widget}".gsub("&", "&amp;").gsub("<", "&lt;")
-          detail = String.build do |s|
-            s << e.time.to_s("%H:%M:%S") << "  " << e.kind
-            s << " ×" << e.count if e.count > 1
-            if (u = e.until) && e.count > 1
-              s << " over " << (u - e.time).total_seconds.round(1) << "s"
-            end
-            if t = e.text
-              s << "  “" << t << "”"
-            end
+      # One pushed event: fold it, then touch exactly one row.
+      private def fold(e : Events::Event) : Nil
+        cutoff = Time.local - @window_secs.seconds
+        @digest.prune(cutoff).each { |old| @rows.delete(old).try { |row| @activity_list.remove(row) } }
+        if touched = @digest.add(e)
+          entry, how = touched
+          case how
+          when :appended
+            row = row_for(entry)
+            @rows[entry] = row
+            @activity_list.prepend(row) # newest on top
+          when :updated
+            @rows[entry]?.try { |row| row.subtitle = subtitle_for(entry) }
           end
-          row.subtitle = detail.gsub("&", "&amp;").gsub("<", "&lt;")
-          icon = case e.kind
-                 when "window" then "window-symbolic"
-                 when "focus"  then "input-keyboard-symbolic"
-                 when "edit"   then "document-edit-symbolic"
-                 when "output" then "utilities-terminal-symbolic"
-                 else               "document-open-symbolic"
-                 end
-          row.add_prefix(::Gtk::Image.new_from_icon_name(icon))
-          @activity_group.add(row)
-          @activity_rows << row
         end
+        placeholder
+      end
+
+      # Re-derive the list from the local history: on a window change or
+      # a (re)connection. Everything else goes through `fold`.
+      private def rebuild_activity : Nil
+        @rows.each_value { |row| @activity_list.remove(row) }
+        @rows.clear
+        @digest = History::Digest.new
+        if @link.connected?
+          @link.history.since(Time.local - @window_secs.seconds).each { |e| @digest.add(e) }
+          @digest.entries.each do |entry|
+            row = row_for(entry)
+            @rows[entry] = row
+            @activity_list.prepend(row)
+          end
+        end
+        placeholder
+      end
+
+      private def placeholder : Nil
+        if @rows.empty?
+          @activity_empty.title = @link.connected? ? "No activity in this window" : "Start the daemon to see activity"
+          @activity_empty.add_css_class("dim-label")
+          @activity_list.append(@activity_empty) unless @activity_empty.parent
+        elsif @activity_empty.parent
+          @activity_list.remove(@activity_empty)
+        end
+      end
+
+      private def row_for(e : History::Entry) : Adw::ActionRow
+        row = Adw::ActionRow.new
+        widget = e.name ? "#{e.role} “#{e.name}”" : (e.role || "?")
+        row.title = "#{e.app}: #{widget}".gsub("&", "&amp;").gsub("<", "&lt;")
+        row.subtitle = subtitle_for(e)
+        icon = case e.kind
+               when "window" then "window-symbolic"
+               when "focus"  then "input-keyboard-symbolic"
+               when "edit"   then "document-edit-symbolic"
+               when "output" then "utilities-terminal-symbolic"
+               else               "document-open-symbolic"
+               end
+        row.add_prefix(::Gtk::Image.new_from_icon_name(icon))
+        row
+      end
+
+      private def subtitle_for(e : History::Entry) : String
+        String.build do |s|
+          s << e.time.to_s("%H:%M:%S") << "  " << e.kind
+          s << " ×" << e.count if e.count > 1
+          if (u = e.until) && e.count > 1
+            s << " over " << (u - e.time).total_seconds.round(1) << "s"
+          end
+          if t = e.text
+            s << "  “" << t << "”"
+          end
+        end.gsub("&", "&amp;").gsub("<", "&lt;")
       end
 
       # ---- Settings page --------------------------------------------------------
@@ -293,29 +335,9 @@ module Camelot
       # ---- state & actions ------------------------------------------------------
 
       private def changed(what : Symbol) : Nil
-        STDERR.puts "camelot-gtk: change: #{what}" if ENV["CAMELOT_DEBUG"]? && what != :event
-        case what
-        when :event then request_redraw
-        else
-          refresh_state
-          request_redraw
-        end
-      end
-
-      private def request_redraw : Nil
-        select
-        when @redraw.send(nil)
-        else
-        end
-      end
-
-      # Coalesce bursts of events into one rebuild.
-      private def redraw_loop : Nil
-        loop do
-          @redraw.receive
-          sleep 150.milliseconds
-          rebuild_activity
-        end
+        STDERR.puts "camelot-gtk: change: #{what}" if ENV["CAMELOT_DEBUG"]?
+        refresh_state
+        rebuild_activity if what == :connected || what == :disconnected
       end
 
       private def refresh_state : Nil

@@ -190,18 +190,48 @@ module Camelot
     record Pending, time : Time, type : String, source : Atspi::Accessible?, detail1 : Int32, detail2 : Int32, text : String? do
       def resolve : Event
         src = source
-        app = src.try { |s| A11y.application?(s) }
         payload = text
         # Never the keystrokes going into a password field.
         payload = nil if payload && src && A11y.secret?(src)
+        where = src ? Resolver.locate(src) : Resolver::Location.new(nil, nil, nil)
         Event.new(
-          time, type,
-          app.try { |a| A11y.safe(nil) { a.name } },
-          src.try { |s| A11y.safe(nil) { s.process_id } },
+          time, type, where.app, where.pid,
           src.try { |s| A11y.safe(nil) { s.role_name } },
           src.try { |s| A11y.safe(nil) { s.name } }.try { |n| n.empty? ? nil : n },
-          src.try { |s| A11y.safe(nil) { A11y.index_path(s) } },
-          detail1, detail2, payload)
+          where.path, detail1, detail2, payload)
+      end
+    end
+
+    # Where a widget lives — app, pid, index path — remembered per source
+    # object. Role and name are served from libatspi's own cache (kept
+    # fresh by property-change events), but the index path is a walk up
+    # the tree with a round trip per level, and a flood of events comes
+    # from a handful of widgets. libatspi hands out one object per remote
+    # widget, so its address identifies it while it is alive; the object
+    # is kept in the entry so the address cannot be reused meanwhile.
+    module Resolver
+      record Location, app : String?, pid : UInt32?, path : String?
+
+      CAPACITY = 512
+      @@cache = {} of UInt64 => {Atspi::Accessible, Location}
+
+      def self.locate(src : Atspi::Accessible) : Location
+        key = src.to_unsafe.address
+        if hit = @@cache[key]?
+          return hit[1]
+        end
+        app = A11y.application?(src)
+        loc = Location.new(
+          app.try { |a| A11y.safe(nil) { a.name } },
+          A11y.safe(nil) { src.process_id },
+          A11y.safe(nil) { A11y.index_path(src) })
+        @@cache.shift if @@cache.size >= CAPACITY
+        @@cache[key] = {src, loc}
+        loc
+      end
+
+      def self.clear : Nil
+        @@cache.clear
       end
     end
 

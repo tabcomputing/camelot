@@ -13,6 +13,8 @@ module Camelot
       # Called (on the main fiber) after any change: an event, a state
       # message, connection or disconnection.
       property on_change : Proc(Symbol, Nil) = ->(what : Symbol) { }
+      # Called for every event the daemon pushes, in order.
+      property on_event : Proc(Events::Event, Nil) = ->(e : Events::Event) { }
 
       def initialize(@socket_path : String = Config.socket_path)
         @history = History.new(Config.current.history, Config.current.retention)
@@ -33,7 +35,7 @@ module Camelot
             case msg
             in Events::Event
               @history.record(msg)
-              notify(:event)
+              on_event.call(msg)
             in Daemon::Status
               @status = msg
               @history.size = msg.capacity

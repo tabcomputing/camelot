@@ -154,9 +154,14 @@ pkg-rpm: pkg-src
 
 pkg: pkg-arch pkg-deb pkg-rpm
 
-# Install the Arch package locally (sudo).
+# Install the Arch packages locally (sudo).
 install-pkg: pkg-arch
-    sudo pacman -U --noconfirm pkg/camelot-[0-9]*-x86_64.pkg.tar.zst
+    sudo pacman -U --noconfirm pkg/camelot-{{version}}-1-x86_64.pkg.tar.zst pkg/camelot-gtk-{{version}}-1-x86_64.pkg.tar.zst
+
+# The development loop on Arch: rebuild, reinstall, restart the daemon.
+reinstall: install-pkg
+    systemctl --user restart camelot
+    @echo "restarted camelot; the panel needs relaunching to pick up a new camelot-gtk"
 
 clean:
     rm -rf bin lib docs/api pkg/build pkg/pkg pkg/src pkg/rpmbuild pkg/*.tar.gz pkg/*.pkg.tar.zst pkg/*.deb pkg/*.buildinfo pkg/*.changes pkg/*.rpm
