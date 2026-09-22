@@ -1,6 +1,8 @@
 require "json"
 require "jargon"
+require "base64"
 require "./commands"
+require "./capture"
 
 module Camelot
   # Model Context Protocol server over stdio (newline-delimited JSON-RPC 2.0).
@@ -13,7 +15,7 @@ module Camelot
     # Subcommands that are not tools: the server itself, the daemon, the
     # unbounded event stream (`recent` is its tool-shaped counterpart), and
     # the user's controls over recording, which are not an AI's to flip.
-    EXCLUDED = Commands::LOCAL_ONLY + Commands::CONTROL
+    EXCLUDED = Commands::NOT_TOOLS
 
     def initialize(@cli : Jargon::CLI, @input : IO = STDIN, @output : IO = STDOUT, @log : IO = STDERR)
     end
@@ -56,11 +58,8 @@ module Camelot
       when "tools/call"
         name = params.try(&.["name"]?).try(&.as_s?) || return error(id, -32602, "missing tool name")
         args = params.try(&.["arguments"]?) || JSON.parse("{}")
-        text, is_error = call(name, args)
-        result(id, {
-          "content" => [{"type" => "text", "text" => text}],
-          "isError" => is_error,
-        })
+        content, is_error = call_content(name, args)
+        result(id, {"content" => content, "isError" => is_error})
       else
         # Notifications (no id) are acknowledged by silence.
         id ? error(id, -32601, "method not found: #{method}") : nil
@@ -72,10 +71,13 @@ module Camelot
       @cli.subcommands.compact_map do |name, schema|
         next if EXCLUDED.includes?(name)
         next unless schema.is_a?(Jargon::Schema)
+        input = input_schema(schema)
+        # `output` writes a file; an MCP client receives the image itself.
+        input.as_h["properties"].as_h.delete("output") if name == "shot"
         {
           "name"        => JSON::Any.new(name),
           "description" => JSON::Any.new(schema.root.description || name),
-          "inputSchema" => input_schema(schema),
+          "inputSchema" => input,
         }
       end
     end
@@ -87,6 +89,29 @@ module Camelot
     rescue ex
       @log.puts "camelot mcp: #{name}: #{ex.inspect_with_backtrace}"
       {"internal error: #{ex.message}", true}
+    end
+
+    # A tool call as MCP content blocks. `shot` answers with an image;
+    # everything else with the command's text.
+    def call_content(name : String, args : JSON::Any) : {Array(Hash(String, String)), Bool}
+      return {[{"type" => "text", "text" => "unknown tool: #{name}"}], true} if EXCLUDED.includes?(name)
+      if name == "shot"
+        return shot(args)
+      end
+      text, is_error = call(name, args)
+      {[{"type" => "text", "text" => text}], is_error}
+    end
+
+    # One frame, as an MCP image block. The desktop announces every
+    # capture its own way; nothing is recorded.
+    private def shot(args : JSON::Any) : {Array(Hash(String, String)), Bool}
+      image = Capture.shot(
+        interactive: args["pick"]?.try(&.as_bool?) || false,
+        max_edge: (args["max-edge"]?.try(&.as_i64?) || Capture::DEFAULT_MAX_EDGE.to_i64).to_i32,
+        quality: (args["quality"]?.try(&.as_i64?) || Capture::DEFAULT_QUALITY.to_i64).to_i32)
+      {[{"type" => "image", "data" => Base64.strict_encode(image.bytes), "mimeType" => image.mime}], false}
+    rescue ex : Capture::Error
+      {[{"type" => "text", "text" => ex.message || "capture failed"}], true}
     end
 
     # ---- schema conversion ---------------------------------------------------

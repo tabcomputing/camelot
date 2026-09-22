@@ -19,10 +19,19 @@ describe Camelot::MCP do
     r["result"]["serverInfo"]["name"].as_s.should eq "camelot"
   end
 
-  it "lists every command except mcp, watch and daemon as a tool" do
+  it "lists the commands an agent may use, and no others" do
     r = rpc(mcp, "tools/list")
     names = r["result"]["tools"].as_a.map(&.["name"].as_s)
-    names.sort.should eq %w[apps at context focus recent status tree windows]
+    names.sort.should eq %w[apps at context focus recent shot status tree windows]
+    # The server, the daemon, the raw stream and the user's own controls
+    # over being recorded are not an agent's to call.
+    (names & %w[mcp daemon watch subscribe pause resume reload]).should be_empty
+  end
+
+  it "does not offer `shot` the option of writing a file" do
+    r = rpc(mcp, "tools/list")
+    shot = r["result"]["tools"].as_a.find! { |t| t["name"] == "shot" }
+    shot["inputSchema"]["properties"].as_h.keys.sort.should eq %w[max-edge pick quality]
   end
 
   it "turns the Jargon schema into plain JSON Schema" do

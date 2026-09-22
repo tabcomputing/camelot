@@ -10,15 +10,18 @@ module Camelot
   module Commands
     # Commands that only the daemon can answer.
     DAEMON_ONLY = %w[recent status pause resume reload subscribe]
-    # Commands that are never forwarded or exposed as tools.
+    # Commands that are never forwarded to the daemon.
     LOCAL_ONLY = %w[mcp watch daemon shot]
     # User controls over the daemon: not offered to an AI as tools.
     CONTROL = %w[pause resume reload subscribe]
+    # Not offered as MCP tools: the server itself, the daemon, the
+    # unbounded stream, and the user's own controls.
+    NOT_TOOLS = %w[mcp watch daemon subscribe] + CONTROL
 
     # Run `name` with `args`. Forwards to a running daemon unless `local`.
     def self.run(cli : Jargon::CLI, name : String, args : JSON::Any, local : Bool = false) : {String, Bool}
-      return {"unknown command: #{name}", true} if LOCAL_ONLY.includes?(name) || !cli.subcommands.has_key?(name)
-      unless local
+      return {"unknown command: #{name}", true} unless cli.subcommands.has_key?(name)
+      unless local || LOCAL_ONLY.includes?(name)
         if answer = Client.call(name, args)
           return answer
         end

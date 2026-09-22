@@ -303,6 +303,11 @@ Then in any session: *"look at what I'm looking at"* → the agent calls
 `text` output, which is the most token-efficient; pass `format: json` when
 the caller wants structure.
 
+The tools are the read-only commands plus `shot`, which answers with the
+image itself (an MCP image block, not a file). What an agent is *not*
+given: the daemon, the raw event stream, and your controls over being
+recorded — `pause`, `resume` and `reload` are yours, not an agent's.
+
 Any MCP client works the same way; the server speaks newline-delimited
 JSON-RPC 2.0, protocol version 2025-06-18, tools only.
 
