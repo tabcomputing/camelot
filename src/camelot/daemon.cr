@@ -30,6 +30,7 @@ module Camelot
       apply_config(first: true)
 
       queue = Events::Queue.new { |event| record(event) }
+      queue.gate = -> { !paused? } # paused costs nothing, not even a lookup
 
       Process.on_terminate do
         select

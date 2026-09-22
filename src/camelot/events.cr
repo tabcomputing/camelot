@@ -86,12 +86,58 @@ module Camelot
     # dispatch. An idle pump costs nothing; an event wakes it immediately.
     # libatspi's context starts with two fds (the a11y bus socket and GLib's
     # wakeup eventfd) and adds one per application it talks to.
+    # Runs a GLib main context inside Crystal's event loop: ask GLib what
+    # it would poll (`prepare`/`query`), wait for exactly that in Crystal,
+    # then let GLib dispatch. No polling, no second thread — but the loop
+    # must never run without letting other fibers (and Crystal's own event
+    # loop) have a turn, or everything else in the process starves.
     class Pump
       MAX_FDS = 64
+      # Most sources dispatched in one pass before breathing. libatspi arms
+      # a source while draining its own queue, so "dispatch until nothing
+      # is ready" can be an infinite loop.
+      MAX_DISPATCH = 64
+      # A real (if tiny) sleep, not `Fiber.yield`: while this fiber stays
+      # runnable Crystal has no reason to run its event loop, so fibers
+      # waiting on timers or IO would never wake.
+      BREATH = 1.millisecond
+      # If GLib keeps claiming a source is ready but dispatching it does
+      # no work, stop asking so often.
+      IDLE_BACKOFF   = 20.milliseconds
+      IDLE_TOLERANCE = 3
+
+      # Reports one fd's readability to the pump, once per wait. Stops
+      # when GLib stops polling that fd: a watcher left on a dead
+      # connection would report EOF forever.
+      class Watcher
+        getter fd : Int32
+
+        def initialize(@fd : Int32, @ready : Channel(Int32))
+          @io = IO::FileDescriptor.new(handle: @fd, close_on_finalize: false)
+          @live = true
+          spawn(name: "glib-fd-#{@fd}") { watch }
+        end
+
+        def stop : Nil
+          @live = false
+        end
+
+        private def watch : Nil
+          while @live
+            begin
+              Crystal::EventLoop.current.wait_readable(@io)
+            rescue IO::Error
+              break # fd closed under us
+            end
+            break unless @live
+            @ready.send(@fd)
+          end
+        end
+      end
 
       @context : Pointer(Void)
       @ready = Channel(Int32).new
-      @watched = {} of Int32 => IO::FileDescriptor
+      @watchers = {} of Int32 => Watcher
 
       def initialize(context : GLib::MainContext = GLib::MainContext.default)
         @context = context.to_unsafe
@@ -101,12 +147,21 @@ module Camelot
       def run(deadline : Time::Instant? = nil, stop : Channel(Nil) = Channel(Nil).new) : Nil
         raise Error.new("GLib main context is owned by another thread") if LibGLib.g_main_context_acquire(@context).zero?
         fds = Slice(LibGLib::PollFD).new(MAX_FDS, LibGLib::PollFD.new)
+        idle = 0
         loop do
           break if deadline && Time.instant >= deadline
+          break if stopped?(stop)
 
-          # Do whatever is ready right now.
-          while LibGLib.g_main_context_iteration(@context, 0) != 0
+          # Dispatch what is ready, but never unboundedly.
+          dispatched = 0
+          while dispatched < MAX_DISPATCH && LibGLib.g_main_context_iteration(@context, 0) != 0
+            dispatched += 1
           end
+          if dispatched >= MAX_DISPATCH
+            sleep BREATH # GLib still has work; come back after a breath
+            next
+          end
+          idle = dispatched > 0 ? 0 : idle + 1
 
           # Ask GLib what it would poll, and wait for that in Crystal.
           priority = 0
@@ -115,18 +170,51 @@ module Camelot
           count = LibGLib.g_main_context_query(@context, priority, pointerof(timeout_ms),
             fds.to_unsafe.as(Pointer(Pointer(LibGLib::PollFD))), fds.size)
           raise Error.new("GLib wants #{count} fds, more than #{MAX_FDS}") if count > fds.size
-          count.times { |i| watch(fds[i].fd) unless @watched.has_key?(fds[i].fd) }
-          next if timeout_ms == 0 # a source is already ready
+          rewatch(fds[0, count])
+
+          if timeout_ms == 0
+            # A source says it is ready now, yet dispatching it did
+            # nothing: breathe rather than spin.
+            sleep(idle > IDLE_TOLERANCE ? IDLE_BACKOFF : BREATH)
+            next
+          end
 
           wait = timeout_ms < 0 ? nil : timeout_ms.milliseconds
           if deadline
             left = deadline - Time.instant
             wait = left if wait.nil? || left < wait
           end
+          wait = IDLE_BACKOFF if wait.nil? && idle > IDLE_TOLERANCE
           break if await(wait, stop) == :stop
         end
       ensure
+        @watchers.each_value(&.stop)
+        @watchers.clear
         LibGLib.g_main_context_release(@context)
+      end
+
+      # Watch exactly the fds GLib polls now: add the new, stop watchers
+      # for fds it has given up (a closed peer connection's fd stays
+      # readable at EOF, and its watcher would wake us forever).
+      private def rewatch(polled : Slice(LibGLib::PollFD)) : Nil
+        wanted = Set(Int32).new
+        polled.each do |pfd|
+          wanted << pfd.fd
+          @watchers[pfd.fd] ||= Watcher.new(pfd.fd, @ready)
+        end
+        @watchers.reject! do |fd, watcher|
+          next false if wanted.includes?(fd)
+          watcher.stop
+          true
+        end
+      end
+
+      private def stopped?(stop : Channel(Nil)) : Bool
+        select
+        when stop.receive? then true
+        else
+          false
+        end
       end
 
       private def await(wait : Time::Span?, stop : Channel(Nil)) : Symbol
@@ -141,25 +229,6 @@ module Camelot
           when @ready.receive then :fd
           when stop.receive? then :stop
           end
-        end
-      end
-
-      # A fiber that reports each time `fd` becomes readable. Readiness is
-      # level-triggered, but the pump drains the fd before this fiber runs
-      # again, so it does not spin.
-      private def watch(fd : Int32) : Nil
-        io = IO::FileDescriptor.new(handle: fd, close_on_finalize: false)
-        @watched[fd] = io
-        spawn(name: "glib-fd-#{fd}") do
-          loop do
-            begin
-              Crystal::EventLoop.current.wait_readable(io)
-            rescue IO::Error
-              break # fd closed under us: GLib will stop asking for it
-            end
-            @ready.send(fd)
-          end
-          @watched.delete(fd)
         end
       end
     end
@@ -248,6 +317,10 @@ module Camelot
     class Queue
       getter dropped : Int64 = 0
 
+      # `gate` is asked before an event is resolved: while it answers
+      # false nothing is looked up, which is what "paused" should cost.
+      property gate : Proc(Bool) = -> { true }
+
       def initialize(types : Array(String) = DEFAULT_TYPES, capacity : Int32 = 4096, &handler : Event ->)
         @channel = Channel(Pending).new(capacity)
         @listener = Listener.new do |ev|
@@ -261,6 +334,7 @@ module Camelot
         types.each { |t| @listener.register(t) }
         spawn(name: "camelot-events") do
           while p = @channel.receive?
+            next unless gate.call
             handler.call(p.resolve)
           end
         end
