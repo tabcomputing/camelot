@@ -100,7 +100,7 @@ module Camelot
           return st.success? ? nil : "systemctl --user start camelot failed"
         end
         exe = File.join(File.dirname(Process.executable_path || "camelot-gtk"), "camelot")
-        exe = "camelot" unless File.executable?(exe)
+        exe = "camelot" unless File.info?(exe).try(&.permissions.owner_execute?)
         Process.new(exe, ["daemon"], input: Process::Redirect::Close, output: Process::Redirect::Close, error: Process::Redirect::Inherit)
         nil
       rescue ex : IO::Error

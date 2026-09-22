@@ -225,9 +225,10 @@ module Camelot
           add.text = ""
         end
         @ignore_group.add(add)
-        pick = Adw::ButtonRow.new
+        pick = Adw::ActionRow.new # (ButtonRow needs libadwaita 1.6)
         pick.title = "Choose a running application…"
-        pick.start_icon_name = "list-add-symbolic"
+        pick.activatable = true
+        pick.add_prefix(::Gtk::Image.new_from_icon_name("list-add-symbolic"))
         pick.activated_signal.connect { pick_application }
         @ignore_group.add(pick)
         rebuild_ignore
