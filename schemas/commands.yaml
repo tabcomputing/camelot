@@ -154,6 +154,18 @@ description: Is the daemon running, and what does it hold
 allOf:
   - {$ref: output}
 ---
+name: pause
+description: Stop the daemon recording (it keeps running and answering); `resume` undoes it
+properties: {}
+---
+name: resume
+description: Resume recording after `pause`
+properties: {}
+---
+name: reload
+description: Make the daemon re-read its config file
+properties: {}
+---
 name: daemon
 description: Run the background service that keeps the bus warm and records activity for `recent`
 properties:

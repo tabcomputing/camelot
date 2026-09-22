@@ -76,7 +76,16 @@ module Camelot
 
     def self.text(io : IO, s : Daemon::Status) : Nil
       io.puts "camelot daemon pid #{s.pid}, up #{s.uptime_seconds.to_i}s since #{s.started.to_s("%H:%M:%S")}"
-      io.puts "events: #{s.events} kept of #{s.total_events} seen (capacity #{s.capacity})"
+      if p = s.paused_since
+        io.puts "recording: PAUSED since #{p.to_s("%H:%M:%S")}"
+      else
+        io.puts "recording: on#{s.text ? "" : " (typed text not recorded)"}"
+      end
+      io.puts "history: #{s.events} events kept of #{s.total_events} seen (up to #{s.capacity}, #{s.retention_seconds // 60}m)"
+      if d = s.log_dir
+        io.puts "log: #{d} (since #{s.log_since.try(&.to_s("%H:%M:%S"))})"
+      end
+      io.puts "ignoring: #{s.ignore.join(", ")}" unless s.ignore.empty?
       io.puts "socket: #{s.socket}"
     end
 

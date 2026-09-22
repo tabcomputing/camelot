@@ -29,8 +29,8 @@ module Camelot
       end
     end
 
-    getter size : Int32
-    getter retention : Time::Span
+    property size : Int32
+    property retention : Time::Span
     getter total : Int64 = 0
 
     # Keeps at most `size` events and nothing older than `retention`.

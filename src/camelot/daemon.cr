@@ -6,33 +6,29 @@ require "./commands"
 
 module Camelot
   # Long-lived process that keeps the accessibility bus connection warm,
-  # records events into `History`, and answers commands over a Unix socket
-  # with the same runner the CLI and MCP use.
+  # records events into `History` (and optionally a durable log), and
+  # answers commands over a Unix socket with the same runner the CLI and
+  # MCP use.
   class Daemon
     getter history : History
     getter started : Time
+    getter config : Config
+    getter paused_since : Time?
 
     def initialize(@cli : Jargon::CLI, @socket_path : String = Config.socket_path,
-                   history_size : Int32 = Config.current.history, @log : IO = STDERR,
-                   @config : Config = Config.current)
-      @history = History.new(history_size, @config.retention)
+                   history_size : Int32? = nil, @log : IO = STDERR, @config : Config = Config.current)
+      @history = History.new(history_size || @config.history, @config.retention)
       @started = Time.local
       @stop = Channel(Nil).new
+      @sink = nil.as(Sink?)
     end
 
     def run : Nil
       A11y.init
       server = listen
-      @log.puts "camelot daemon: listening on #{@socket_path}, keeping #{@history.size} events for #{@history.retention.total_minutes.to_i}m" \
-                "#{@config.text ? "" : ", typed text not recorded"}"
-      enable_accessibility if @config.accessibility
+      apply_config(first: true)
 
-      listener = Events::Listener.new do |ev|
-        event = Events.capture(ev)
-        next if @config.ignored?(event.app)
-        event.text = nil unless @config.text
-        @history.record(event)
-      end
+      listener = Events::Listener.new { |ev| record(ev) }
       Events::DEFAULT_TYPES.each { |t| listener.register(t) }
 
       Process.on_terminate { @stop.send(nil) }
@@ -41,8 +37,80 @@ module Camelot
     ensure
       listener.try &.deregister_all
       server.try &.close
+      @sink.try &.close
       File.delete?(@socket_path)
       @log.puts "camelot daemon: stopped"
+    end
+
+    def paused? : Bool
+      !@paused_since.nil?
+    end
+
+    # ---- recording -----------------------------------------------------------
+
+    private def record(ev : Atspi::Event) : Nil
+      return if paused?
+      event = Events.capture(ev)
+      return if @config.ignored?(event.app)
+      event.text = nil unless @config.text
+      @history.record(event)
+      @sink.try &.write(event)
+    end
+
+    # Durable log: one JSON line per event, one file per day.
+    class Sink
+      getter dir : String
+      getter since : Time
+
+      def initialize(@dir : String)
+        Dir.mkdir_p(@dir)
+        File.chmod(@dir, 0o700)
+        @since = Time.local
+        @day = ""
+        @file = nil.as(File?)
+      end
+
+      def write(event : Events::Event) : Nil
+        day = event.time.to_s("%Y-%m-%d")
+        if day != @day
+          @file.try &.close
+          @file = File.open(File.join(@dir, "events-#{day}.jsonl"), "a", perm: 0o600)
+          @day = day
+        end
+        if f = @file
+          f.puts event.to_json
+          f.flush
+        end
+      end
+
+      def close : Nil
+        @file.try &.close
+        @file = nil
+      end
+    end
+
+    # ---- configuration -------------------------------------------------------
+
+    # (Re)apply the current config: history bounds, the durable log, and
+    # the accessibility switch.
+    private def apply_config(first = false) : Nil
+      @history.size = @config.history
+      @history.retention = @config.retention
+      @history.expire
+
+      dir = @config.log_dir
+      if dir != @sink.try(&.dir)
+        @sink.try &.close
+        @sink = dir ? Sink.new(dir) : nil
+      end
+
+      enable_accessibility if @config.accessibility
+
+      @log.puts "camelot daemon: #{first ? "listening on #{@socket_path}, " : "reloaded: "}" \
+                "keeping #{@history.size} events for #{@history.retention.total_minutes.to_i}m" \
+                "#{@config.text ? "" : ", typed text not recorded"}" \
+                "#{dir ? ", logging to #{dir}" : ""}" \
+                "#{@config.ignore.empty? ? "" : ", ignoring #{@config.ignore.join(", ")}"}"
     end
 
     # Browsers and some toolkits only build their accessibility tree when
@@ -60,6 +128,8 @@ module Camelot
                   "(applies to apps started from now on; set `accessibility: false` in config to leave it alone)"
       end
     end
+
+    # ---- socket --------------------------------------------------------------
 
     private def listen : UNIXServer
       if File.exists?(@socket_path)
@@ -98,6 +168,9 @@ module Camelot
       output, is_error = case command
                          when "recent" then recent(args)
                          when "status" then status(args)
+                         when "pause"  then pause
+                         when "resume" then resume
+                         when "reload" then reload
                          else               Commands.run(@cli, command, args, local: true)
                          end
       is_error ? {"ok" => false, "error" => output} : {"ok" => true, "output" => output}
@@ -115,6 +188,9 @@ module Camelot
       since = Time.local - seconds.seconds
       format = result["format"]?.try(&.as_s?) || "text"
       buffer = IO::Memory.new
+      if (p = @paused_since) && format == "text"
+        buffer.puts "(recording paused since #{p.to_s("%H:%M:%S")})"
+      end
       if result["raw"]?.try(&.as_bool?)
         events = @history.since(since)
         events = events[-limit..] if events.size > limit
@@ -128,13 +204,43 @@ module Camelot
 
     private def status(args : JSON::Any) : {String, Bool}
       format = args["format"]?.try(&.as_s?) || "text"
-      info = Status.new(Process.pid, @started, (Time.local - @started).total_seconds.round(1), @history.count, @history.total, @history.size, @socket_path)
+      info = Status.new(Process.pid, @started, (Time.local - @started).total_seconds.round(1),
+        @history.count, @history.total, @history.size, @history.retention.total_seconds.to_i64,
+        @config.text, @paused_since, @sink.try(&.dir), @sink.try(&.since), @config.ignore, @socket_path)
       buffer = IO::Memory.new
       Format.emit(buffer, info, format)
       {buffer.to_s, false}
     end
 
-    record Status, pid : Int64, started : Time, uptime_seconds : Float64, events : Int32, total_events : Int64, capacity : Int32, socket : String do
+    private def pause : {String, Bool}
+      if p = @paused_since
+        return {"already paused since #{p.to_s("%H:%M:%S")}\n", false}
+      end
+      @paused_since = Time.local
+      @log.puts "camelot daemon: recording paused"
+      {"recording paused\n", false}
+    end
+
+    private def resume : {String, Bool}
+      return {"not paused\n", false} unless paused?
+      @paused_since = nil
+      @log.puts "camelot daemon: recording resumed"
+      {"recording resumed\n", false}
+    end
+
+    private def reload : {String, Bool}
+      @config = Config.load
+      Config.current = @config # keeps A11y.snapshot's ignore check in step
+      apply_config
+      {"reloaded #{Config.path}\n", false}
+    rescue ex : Config::Error
+      {ex.message.to_s, true}
+    end
+
+    record Status, pid : Int64, started : Time, uptime_seconds : Float64,
+      events : Int32, total_events : Int64, capacity : Int32, retention_seconds : Int64,
+      text : Bool, paused_since : Time?, log_dir : String?, log_since : Time?,
+      ignore : Array(String), socket : String do
       include JSON::Serializable
       include YAML::Serializable
     end

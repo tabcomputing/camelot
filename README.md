@@ -227,7 +227,15 @@ history: 2000        # most events the daemon keeps...
 retention: 30m       # ...and for how long (s/m/h/d suffix, or seconds)
 text: true           # record what was typed, not just that typing happened
 accessibility: true  # daemon turns on toolkit accessibility at start (see Browsers)
+log: false           # durable log: true ($XDG_STATE_HOME/camelot), or a directory
 ```
+
+`camelot reload` makes a running daemon re-read the file. `camelot pause`
+stops it recording anything (it keeps running and answering; `status` and
+`recent` say so) until `camelot resume`. With `log:` on, every recorded
+event is also appended to `events-YYYY-MM-DD.jsonl` in that directory
+(mode 0600) — off by default, and `status` shows where it is logging.
+These three are user controls: they are deliberately not MCP tools.
 
 Ignored applications are reported as a redacted shell (role and name only)
 by every command, and the daemon records nothing from them. `text: false`

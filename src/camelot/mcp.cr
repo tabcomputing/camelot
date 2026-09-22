@@ -10,9 +10,10 @@ module Camelot
   class MCP
     PROTOCOL_VERSION = "2025-06-18"
 
-    # Subcommands that are not tools: the server itself, the daemon, and
-    # the unbounded event stream (`recent` is its tool-shaped counterpart).
-    EXCLUDED = Commands::LOCAL_ONLY
+    # Subcommands that are not tools: the server itself, the daemon, the
+    # unbounded event stream (`recent` is its tool-shaped counterpart), and
+    # the user's controls over recording, which are not an AI's to flip.
+    EXCLUDED = Commands::LOCAL_ONLY + Commands::CONTROL
 
     def initialize(@cli : Jargon::CLI, @input : IO = STDIN, @output : IO = STDOUT, @log : IO = STDERR)
     end

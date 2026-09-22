@@ -70,6 +70,12 @@ describe Camelot::Config do
     c.accessibility.should be_true
   end
 
+  it "resolves the log directory" do
+    Camelot::Config.from_yaml("log: false").log_dir.should be_nil
+    Camelot::Config.from_yaml("log: ~/logs").log_dir.should eq File.join(Path.home, "logs")
+    Camelot::Config.from_yaml("log: true").log_dir.not_nil!.should end_with "/camelot"
+  end
+
   it "parses durations with s/m/h/d suffixes" do
     Camelot::Config.from_yaml("retention: 90s").retention.should eq 90.seconds
     Camelot::Config.from_yaml("retention: 2h").retention.should eq 2.hours
