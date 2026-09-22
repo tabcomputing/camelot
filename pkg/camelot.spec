@@ -45,7 +45,6 @@ install -Dpm0755 bin/camelot %{buildroot}%{_bindir}/camelot
 install -Dpm0644 completions.bash %{buildroot}%{_datadir}/bash-completion/completions/camelot
 install -Dpm0644 completions.zsh  %{buildroot}%{_datadir}/zsh/site-functions/_camelot
 install -Dpm0644 completions.fish %{buildroot}%{_datadir}/fish/vendor_completions.d/camelot.fish
-%{_userunitdir}/camelot.service
 install -Dpm0644 contrib/camelot.service %{buildroot}%{_userunitdir}/camelot.service
 install -Dpm0644 README.md %{buildroot}%{_docdir}/%{name}/README.md
 install -Dpm0644 LICENSE %{buildroot}%{_licensedir}/%{name}/LICENSE
