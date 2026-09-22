@@ -198,6 +198,25 @@ run a non-blocking iteration. No polling, no second thread; Crystal's own
 fibers, IO and timers run alongside, and an idle pump costs ~0.2% CPU
 (libatspi's own periodic timeout, not ours).
 
+### `shot`
+
+```sh
+camelot shot -o screen.jpg     # the whole screen
+camelot shot --pick -o win.jpg # the desktop's picker: a window or a region
+camelot shot | your-tool       # JPEG on stdout
+```
+
+Capture goes through the XDG desktop portal, so the desktop grants it and
+announces each frame its own way (on GNOME, the shutter flash and sound).
+A 2560x1440 screen arrives as a ~145 kB JPEG scaled to fit `--max-edge`
+(1568 by default, which is as much as a vision model uses).
+
+**Capture is always a pull.** A frame is taken when something asks for
+one, handed over, and dropped: no frame enters the event stream or the
+daemon's history, which would cost more memory in a minute than the whole
+event log does in a day. `screenshots: false` in the config switches
+capture off entirely.
+
 ### `daemon`, `recent`, `status`
 
 The daemon keeps the bus connection warm and records window switches,

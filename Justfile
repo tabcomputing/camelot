@@ -114,7 +114,7 @@ pkg-arch-container: pkg-src
     #!/usr/bin/env bash
     set -euo pipefail
     {{container}} run --rm -v "$PWD/pkg:/pkg" docker.io/library/archlinux:base-devel bash -euo pipefail -c '
-      pacman -Syu --noconfirm --needed crystal shards git libgirepository gobject-introspection-runtime at-spi2-core glib2 dbus gc pcre2 libyaml gcc-libs zlib gtk4 libadwaita >/dev/null
+      pacman -Syu --noconfirm --needed crystal shards git libgirepository gobject-introspection-runtime at-spi2-core glib2 gdk-pixbuf2 dbus gc pcre2 libyaml gcc-libs zlib gtk4 libadwaita >/dev/null
       useradd -m builder
       rm -rf /build && mkdir /build && cp /pkg/camelot-{{version}}.tar.gz /pkg/PKGBUILD /pkg/camelot.install /build/
       chown -R builder:builder /build
@@ -131,7 +131,7 @@ pkg-deb: pkg-src
       apt-get update -qq
       apt-get install -y -qq --no-install-recommends curl ca-certificates gnupg >/dev/null
       curl -fsSL https://crystal-lang.org/install.sh | bash >/dev/null
-      apt-get install -y -qq --no-install-recommends debhelper git build-essential libgirepository1.0-dev gir1.2-atspi-2.0 libatspi2.0-dev libglib2.0-dev libdbus-1-dev libgc-dev libpcre2-dev libyaml-dev zlib1g-dev libgtk-4-dev libadwaita-1-dev gir1.2-gtk-4.0 gir1.2-adw-1 >/dev/null
+      apt-get install -y -qq --no-install-recommends debhelper git build-essential libgirepository1.0-dev gir1.2-atspi-2.0 libatspi2.0-dev libglib2.0-dev libgdk-pixbuf-2.0-dev gir1.2-gdkpixbuf-2.0 libdbus-1-dev libgc-dev libpcre2-dev libyaml-dev zlib1g-dev libgtk-4-dev libadwaita-1-dev gir1.2-gtk-4.0 gir1.2-adw-1 >/dev/null
       rm -rf /build && mkdir /build && cd /build
       tar xzf /pkg/camelot-{{version}}.tar.gz
       cd camelot-{{version}} && cp -a pkg/debian debian
@@ -146,7 +146,7 @@ pkg-rpm: pkg-src
     {{container}} run --rm -v "$PWD/pkg:/pkg" registry.fedoraproject.org/fedora:latest bash -euo pipefail -c '
       dnf install -y -q curl >/dev/null
       curl -fsSL https://crystal-lang.org/install.sh | bash >/dev/null
-      dnf install -y -q rpm-build gcc git redhat-rpm-config gobject-introspection-devel at-spi2-core-devel glib2-devel dbus-devel gc-devel pcre2-devel libyaml-devel zlib-devel gtk4-devel libadwaita-devel >/dev/null
+      dnf install -y -q rpm-build gcc git redhat-rpm-config gobject-introspection-devel at-spi2-core-devel glib2-devel gdk-pixbuf2-devel dbus-devel gc-devel pcre2-devel libyaml-devel zlib-devel gtk4-devel libadwaita-devel >/dev/null
       mkdir -p /rpmbuild/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
       cp /pkg/camelot-{{version}}.tar.gz /rpmbuild/SOURCES/
       cp /pkg/camelot.spec /rpmbuild/SPECS/

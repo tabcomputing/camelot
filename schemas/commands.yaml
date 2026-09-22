@@ -166,6 +166,29 @@ name: reload
 description: Make the daemon re-read its config file
 properties: {}
 ---
+name: shot
+description: Capture the screen through the desktop portal (the desktop announces it; nothing is recorded)
+properties:
+  pick:
+    type: boolean
+    short: p
+    description: Let the desktop's picker choose a window or region
+  output:
+    type: string
+    short: o
+    format: path
+    description: "Write the image here (default: stdout)"
+  max-edge:
+    type: integer
+    default: 1568
+    description: Scale so the long edge is at most this (0 = full size)
+  quality:
+    type: integer
+    default: 80
+    minimum: 1
+    maximum: 100
+    description: JPEG quality
+---
 name: subscribe
 description: "Stream the daemon's recorded events and state changes as JSON lines (backfill first); Ctrl-C to stop"
 properties:

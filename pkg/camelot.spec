@@ -16,6 +16,7 @@ BuildRequires:  redhat-rpm-config
 BuildRequires:  gobject-introspection-devel
 BuildRequires:  at-spi2-core-devel
 BuildRequires:  glib2-devel
+BuildRequires:  gdk-pixbuf2-devel
 BuildRequires:  dbus-devel
 BuildRequires:  gc-devel
 BuildRequires:  pcre2-devel

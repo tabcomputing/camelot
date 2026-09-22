@@ -37,6 +37,8 @@ module Camelot
             result["history"]?.try(&.as_i64?).try(&.to_i32) || Config.current.history).run
         when "watch"
           new(result).dispatch
+        when "shot"
+          new(result).cmd_shot
         when "subscribe"
           seconds = result["seconds"]?.try(&.as_i64?)
           streamed = Client.subscribe(seconds) do |msg|
@@ -64,7 +66,7 @@ module Camelot
     rescue ex : Error
       STDERR.puts "camelot: #{ex.message}"
       exit 1
-    rescue ex : A11y::Error | Config::Error
+    rescue ex : A11y::Error | Config::Error | Capture::Error
       STDERR.puts "camelot: #{ex.message}"
       exit 2
     rescue ex : IO::Error
@@ -162,6 +164,24 @@ module Camelot
               win ? A11y.at_point(win, x, y) : fail("no active window; name an application")
             end
       Format.emit(@out, A11y.snapshot(acc || fail("nothing at #{x},#{y}"), snapshot_options(depth: 0)), @format)
+    end
+
+    # Capture is deliberately not forwarded to the daemon: binary has no
+    # place in a line-based JSON protocol, and the portal answers any
+    # process of ours just as well.
+    def cmd_shot : Nil
+      image = Capture.shot(
+        interactive: bool?("pick"),
+        max_edge: int?("max-edge") || Capture::DEFAULT_MAX_EDGE,
+        quality: int?("quality") || Capture::DEFAULT_QUALITY)
+      if path = str?("output")
+        File.write(path, image.bytes)
+        @out.puts "#{path}: #{image.width}x#{image.height}, #{image.size // 1024} kB #{image.mime}"
+      elsif @out.tty?
+        fail("refusing to write an image to the terminal; use -o FILE or pipe it")
+      else
+        @out.write(image.bytes)
+      end
     end
 
     private def cmd_context

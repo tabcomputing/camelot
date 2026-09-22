@@ -10,6 +10,7 @@ license=('MIT')
 depends=(
   'at-spi2-core'
   'glib2'
+  'gdk-pixbuf2'
   'dbus'
   'gc'
   'pcre2'

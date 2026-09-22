@@ -1,0 +1,3 @@
+# GdkPixbuf: loading and scaling the PNG the screenshot portal hands us.
+namespace: GdkPixbuf
+version: "2.0"

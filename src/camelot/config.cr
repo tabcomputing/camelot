@@ -10,6 +10,7 @@ module Camelot
   #   retention: 30m       # ...and for how long (s/m/h suffix, or seconds)
   #   text: true           # record what was typed, not just that typing happened
   #   accessibility: true  # daemon turns on toolkit accessibility at start
+  #   screenshots: true    # allow screen capture at all (the desktop announces each one)
   #   log: false           # durable JSONL log: false, true ($XDG_STATE_HOME/camelot), or a directory
   #
   class Config
@@ -21,6 +22,7 @@ module Camelot
     property retention : Time::Span = 30.minutes
     property text : Bool = true
     property accessibility : Bool = true
+    property screenshots : Bool = true
     property log : Bool | String = false
 
     # Directory for the durable log, or nil when logging is off.

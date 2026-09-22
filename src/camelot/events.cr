@@ -135,6 +135,9 @@ module Camelot
         end
       end
 
+      # Is a pump already driving the default context in this process?
+      class_property? running : Bool = false
+
       @context : Pointer(Void)
       @ready = Channel(Int32).new
       @watchers = {} of Int32 => Watcher
@@ -146,6 +149,7 @@ module Camelot
       # Run until `stop` yields, or `deadline` passes.
       def run(deadline : Time::Instant? = nil, stop : Channel(Nil) = Channel(Nil).new) : Nil
         raise Error.new("GLib main context is owned by another thread") if LibGLib.g_main_context_acquire(@context).zero?
+        Pump.running = true
         fds = Slice(LibGLib::PollFD).new(MAX_FDS, LibGLib::PollFD.new)
         idle = 0
         loop do
@@ -188,6 +192,7 @@ module Camelot
           break if await(wait, stop) == :stop
         end
       ensure
+        Pump.running = false
         @watchers.each_value(&.stop)
         @watchers.clear
         LibGLib.g_main_context_release(@context)

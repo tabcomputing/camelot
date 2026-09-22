@@ -1,6 +1,7 @@
 require "./camelot/version"
 require "./camelot/a11y"
 require "./camelot/context"
+require "./camelot/capture"
 require "./camelot/format"
 require "./camelot/config"
 require "./camelot/history"
