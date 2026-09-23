@@ -39,6 +39,8 @@ module Camelot
           new(result).dispatch
         when "shot"
           new(result).cmd_shot
+        when "shelf"
+          new(result).cmd_shelf
         when "subscribe"
           seconds = result["seconds"]?.try(&.as_i64?)
           streamed = Client.subscribe(seconds) do |msg|
@@ -179,7 +181,10 @@ module Camelot
         interactive: bool?("pick"),
         max_edge: int?("max-edge") || Capture::DEFAULT_MAX_EDGE,
         quality: int?("quality") || Capture::DEFAULT_QUALITY)
-      if path = str?("output")
+      if bool?("shelf")
+        item = Shelf.put(image, bool?("pick") ? "pick" : "shot")
+        @out.puts "on the shelf: #{item.width}x#{item.height}, #{item.bytes // 1024} kB (#{item.path})"
+      elsif path = str?("output")
         File.write(path, image.bytes)
         @out.puts "#{path}: #{image.width}x#{image.height}, #{image.size // 1024} kB #{image.mime}"
       elsif @out.tty?
@@ -217,6 +222,27 @@ module Camelot
         end
       else
         Format.emit(@out, PointerReport.new(r.point, app, r.window, node), @format)
+      end
+    end
+
+    def cmd_shelf : Nil
+      if bool?("clear")
+        @out.puts Shelf.clear ? "shelf emptied" : "the shelf was already empty"
+        return
+      end
+      item = Shelf.item
+      unless item
+        @out.puts "the shelf is empty"
+        return
+      end
+      if path = str?("output")
+        File.write(path, item.data)
+        @out.puts "#{path}: #{item.width}x#{item.height}, #{item.bytes // 1024} kB #{item.mime}"
+      elsif @format == "text"
+        @out.puts "#{item.source} #{item.width}x#{item.height}, #{item.bytes // 1024} kB #{item.mime}, shelved at #{item.time.to_s("%H:%M:%S")}"
+        @out.puts item.path
+      else
+        Format.emit(@out, item, @format)
       end
     end
 

@@ -11,7 +11,7 @@ module Camelot
     # Commands that only the daemon can answer.
     DAEMON_ONLY = %w[recent status pause resume reload subscribe]
     # Commands that are never forwarded to the daemon.
-    LOCAL_ONLY = %w[mcp watch daemon shot pointer]
+    LOCAL_ONLY = %w[mcp watch daemon shot pointer shelf]
     # User controls over the daemon: not offered to an AI as tools.
     CONTROL = %w[pause resume reload subscribe]
     # Not offered as MCP tools: the server itself, the daemon, the

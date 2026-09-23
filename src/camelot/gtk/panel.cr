@@ -35,6 +35,16 @@ module Camelot
       @ignore_group : Adw::PreferencesGroup
       @ignore_rows = [] of ::Gtk::Widget
       @syncing = false
+      # shelf
+      @shelf_picture : ::Gtk::Picture
+      @shelf_empty : ::Gtk::Label
+      @shelf_caption : ::Gtk::Label
+      @shelf_drag : ::Gtk::DragSource
+      @pick_button : ::Gtk::Button
+      @copy_button : ::Gtk::Button
+      @discard_button : ::Gtk::Button
+      @shelf_monitor : Gio::FileMonitor?
+      @picking = false
 
       def initialize(app : Adw::Application, @link : Link, @config : Config)
         @window = Adw::ApplicationWindow.new(app)
@@ -54,6 +64,13 @@ module Camelot
         @activity_list = ::Gtk::ListBox.new
         @activity_empty = Adw::ActionRow.new
         @ignore_group = Adw::PreferencesGroup.new
+        @shelf_picture = ::Gtk::Picture.new
+        @shelf_empty = ::Gtk::Label.new("")
+        @shelf_caption = ::Gtk::Label.new("")
+        @shelf_drag = ::Gtk::DragSource.new
+        @pick_button = ::Gtk::Button.new_with_label("Pick…")
+        @copy_button = ::Gtk::Button.new_with_label("Copy")
+        @discard_button = ::Gtk::Button.new_with_label("Discard")
 
         @nav.add(page("Camelot", switchboard))
         @toasts.child = @nav
@@ -64,6 +81,8 @@ module Camelot
         refresh_state
         rebuild_activity
         rebuild_ignore
+        watch_shelf
+        refresh_shelf
       end
 
       def present : Nil
@@ -81,6 +100,7 @@ module Camelot
 
       private def switchboard : ::Gtk::Widget
         pg = Adw::PreferencesPage.new
+        pg.add(shelf_group)
 
         service = Adw::PreferencesGroup.new
         @daemon_row.title = "Background service"
@@ -149,6 +169,142 @@ module Camelot
         pg.add(more)
 
         pg
+      end
+
+      # ---- Shelf -----------------------------------------------------------------
+
+      # The one thing you chose to show an AI. Drag the picture anywhere that
+      # takes images, copy it, or tell an agent to look at your shelf.
+      private def shelf_group : Adw::PreferencesGroup
+        group = Adw::PreferencesGroup.new
+        group.title = "Shelf"
+        group.description = "What you choose to show an AI. Drag it into a chat or terminal, copy it, " \
+                            "or ask an agent to look at your shelf."
+        @pick_button.add_css_class("suggested-action")
+        @pick_button.valign = ::Gtk::Align::Center
+        @pick_button.tooltip_text = "Choose a window or region to put on the shelf"
+        @pick_button.clicked_signal.connect { pick }
+        group.header_suffix = @pick_button
+
+        @shelf_picture.content_fit = ::Gtk::ContentFit::Contain
+        @shelf_picture.can_shrink = true
+        @shelf_picture.height_request = 200
+        @shelf_picture.tooltip_text = "Drag me somewhere"
+        @shelf_picture.add_controller(@shelf_drag)
+        @shelf_drag.drag_begin_signal.connect do
+          if (paintable = @shelf_picture.paintable)
+            @shelf_drag.set_icon(paintable, 0, 0)
+          end
+        end
+        group.add(@shelf_picture)
+
+        @shelf_empty.label = "Nothing on the shelf. Pick a window or region to share it."
+        @shelf_empty.add_css_class("dim-label")
+        @shelf_empty.margin_top = 24
+        @shelf_empty.margin_bottom = 24
+        group.add(@shelf_empty)
+
+        row = ::Gtk::Box.new(::Gtk::Orientation::Horizontal, 6)
+        row.margin_top = 6
+        @shelf_caption.add_css_class("dim-label")
+        @shelf_caption.xalign = 0
+        @shelf_caption.hexpand = true
+        row.append(@shelf_caption)
+        @copy_button.tooltip_text = "Copy the image to the clipboard"
+        @copy_button.clicked_signal.connect { copy_shelf }
+        row.append(@copy_button)
+        @discard_button.tooltip_text = "Empty the shelf"
+        @discard_button.clicked_signal.connect do
+          Shelf.clear
+          refresh_shelf
+        end
+        row.append(@discard_button)
+        group.add(row)
+        group
+      end
+
+      # The panel leaves the stage while you pick, so it is not in the way,
+      # and comes back holding what you picked. The capture waits in its own
+      # fiber: the portal answers through the GLib loop this handler is
+      # running on, so waiting here would wait forever.
+      private def pick : Nil
+        return if @picking
+        @picking = true
+        @pick_button.sensitive = false
+        spawn(name: "camelot-gtk-pick") do
+          begin
+            @window.minimize
+            sleep 400.milliseconds
+            Shelf.put(Capture.shot(interactive: true), "pick")
+          rescue ex : Capture::Error
+            toast(ex.message.to_s) unless ex.message.to_s.includes?("declined") # a cancel, not an error
+          ensure
+            @window.present
+            @picking = false
+            @pick_button.sensitive = true
+            refresh_shelf
+          end
+        end
+      end
+
+      private def copy_shelf : Nil
+        item = Shelf.item || return
+        # A texture, so the clipboard can offer PNG as well as JPEG to
+        # whatever pastes it.
+        texture = Gdk::Texture.new_from_filename(item.path)
+        @window.clipboard.content = Gdk::ContentProvider.new_for_value(texture)
+        toast("Copied — paste it anywhere")
+      rescue ex
+        toast("Could not copy: #{ex.message}")
+      end
+
+      private def refresh_shelf : Nil
+        item = Shelf.item
+        @copy_button.sensitive = !item.nil?
+        @discard_button.sensitive = !item.nil?
+        if item
+          begin
+            @shelf_picture.paintable = Gdk::Texture.new_from_filename(item.path)
+          rescue
+            @shelf_picture.paintable = nil
+          end
+          @shelf_picture.visible = true
+          @shelf_empty.visible = false
+          @shelf_caption.label = "#{item.source} · #{item.width}×#{item.height} · #{item.time.to_s("%H:%M")}"
+          @shelf_drag.content = drag_content(item)
+        else
+          @shelf_picture.paintable = nil
+          @shelf_picture.visible = false
+          @shelf_empty.visible = true
+          @shelf_caption.label = ""
+          @shelf_drag.content = nil
+        end
+      end
+
+      # A dragged shelf item is a file (terminals insert the path, browsers
+      # and chats upload it), and plain text of that path for anything that
+      # only takes text.
+      private def drag_content(item : Shelf::Item) : Gdk::ContentProvider
+        uri = "file://#{item.path}\r\n"
+        Gdk::ContentProvider.new_union([
+          Gdk::ContentProvider.new_for_bytes("text/uri-list", GLib::Bytes.new(uri.to_unsafe, uri.bytesize)),
+          Gdk::ContentProvider.new_for_bytes("text/plain;charset=utf-8", GLib::Bytes.new(item.path.to_unsafe, item.path.bytesize)),
+        ])
+      end
+
+      # The shelf changes from the command line too (`camelot shot --pick
+      # --shelf`); inotify tells us, no timers.
+      private def watch_shelf : Nil
+        Dir.mkdir_p(Shelf.dir)
+        File.chmod(Shelf.dir, 0o700)
+        mon = Gio::File.new_for_path(Shelf.dir).monitor_directory(Gio::FileMonitorFlags::None, nil)
+        mon.changed_signal.connect do |file, _other, _kind|
+          # (gi-crystal hands the basename back as a Path, not a String)
+          refresh_shelf if file.basename.to_s == "shelf.json"
+        end
+        @shelf_monitor = mon
+      rescue ex
+        STDERR.puts "camelot-gtk: cannot watch the shelf: #{ex.message}"
       end
 
       # ---- Activity page --------------------------------------------------------

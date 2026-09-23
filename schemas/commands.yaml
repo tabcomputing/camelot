@@ -199,6 +199,24 @@ properties:
     minimum: 1
     maximum: 100
     description: JPEG quality
+  shelf:
+    type: boolean
+    short: s
+    description: Put the image on the shelf, to share it, instead of writing it out
+---
+name: shelf
+description: "What the user has put on their shelf to show you: a window or region they picked"
+allOf:
+  - {$ref: output}
+  - properties:
+      clear:
+        type: boolean
+        description: Empty the shelf
+      output:
+        type: string
+        short: o
+        format: path
+        description: Write the image here
 ---
 name: subscribe
 description: "Stream the daemon's recorded events and state changes as JSON lines (backfill first); Ctrl-C to stop"

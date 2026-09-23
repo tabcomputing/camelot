@@ -217,6 +217,25 @@ daemon's history, which would cost more memory in a minute than the whole
 event log does in a day. `screenshots: false` in the config switches
 capture off entirely.
 
+### The shelf
+
+One slot for the thing you choose to show an AI. **Pick…** in the panel
+(or `camelot shot --pick --shelf`) lets you choose a window or region with
+the desktop's own picker; the result lands on the shelf, where you can drag
+it into a terminal, chat or browser, copy it to the clipboard, or ask an
+agent to look at it — the MCP `shelf` tool hands over the same image.
+
+```sh
+camelot shot --pick --shelf    # choose, and put it on the shelf
+camelot shelf                  # what is on it
+camelot shelf -o out.jpg       # write it out
+camelot shelf --clear          # empty it
+```
+
+It is the only image camelot keeps, and only because you put it there: one
+item, in `$XDG_RUNTIME_DIR/camelot/` (memory-backed, private to you, gone
+at logout). Agents can look at it but cannot fill or empty it.
+
 ### `daemon`, `recent`, `status`
 
 The daemon keeps the bus connection warm and records window switches,

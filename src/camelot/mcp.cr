@@ -3,6 +3,7 @@ require "jargon"
 require "base64"
 require "./commands"
 require "./capture"
+require "./shelf"
 
 module Camelot
   # Model Context Protocol server over stdio (newline-delimited JSON-RPC 2.0).
@@ -72,8 +73,14 @@ module Camelot
         next if EXCLUDED.includes?(name)
         next unless schema.is_a?(Jargon::Schema)
         input = input_schema(schema)
-        # `output` writes a file; an MCP client receives the image itself.
-        input.as_h["properties"].as_h.delete("output") if name == "shot"
+        # An MCP client receives images, it does not want files written; and
+        # the shelf is the user's, to fill and to empty.
+        if props = input.as_h["properties"]?.try(&.as_h?)
+          case name
+          when "shot"  then props.delete("output"); props.delete("shelf")
+          when "shelf" then props.delete("output"); props.delete("clear")
+          end
+        end
         {
           "name"        => JSON::Any.new(name),
           "description" => JSON::Any.new(schema.root.description || name),
@@ -95,9 +102,8 @@ module Camelot
     # everything else with the command's text.
     def call_content(name : String, args : JSON::Any) : {Array(Hash(String, String)), Bool}
       return {[{"type" => "text", "text" => "unknown tool: #{name}"}], true} if EXCLUDED.includes?(name)
-      if name == "shot"
-        return shot(args)
-      end
+      return shot(args) if name == "shot"
+      return shelf if name == "shelf"
       text, is_error = call(name, args)
       {[{"type" => "text", "text" => text}], is_error}
     end
@@ -112,6 +118,19 @@ module Camelot
       {[{"type" => "image", "data" => Base64.strict_encode(image.bytes), "mimeType" => image.mime}], false}
     rescue ex : Capture::Error
       {[{"type" => "text", "text" => ex.message || "capture failed"}], true}
+    end
+
+    # What the user put on their shelf: the image, and a line saying what it is.
+    private def shelf : {Array(Hash(String, String)), Bool}
+      item = Shelf.item
+      unless item
+        return {[{"type" => "text", "text" => "The shelf is empty: the user has not shared anything. " \
+                                              "They can pick a window or region in the Camelot panel, or with `camelot shot --pick --shelf`."}], false}
+      end
+      note = "The user shared this #{item.source == "pick" ? "picked window or region" : "screenshot"} " \
+             "(#{item.width}x#{item.height}) at #{item.time.to_s("%H:%M:%S")}."
+      {[{"type" => "text", "text" => note},
+        {"type" => "image", "data" => Base64.strict_encode(item.data), "mimeType" => item.mime}], false}
     end
 
     # ---- schema conversion ---------------------------------------------------
