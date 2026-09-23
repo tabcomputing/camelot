@@ -49,6 +49,28 @@ mcp-add:
 mcp-remove:
     claude mcp remove --scope user camelot
 
+# ---- GNOME Shell extension --------------------------------------------------
+
+# Test the extension in a throwaway headless GNOME Shell (touches nothing live).
+extension-test: build-debug
+    contrib/gnome-extension/test.sh
+
+# Install the extension for this user and enable it; takes effect at next login.
+extension-install:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    dest="$HOME/.local/share/gnome-shell/extensions/camelot@tabcomputing.com"
+    mkdir -p "$dest"
+    cp contrib/gnome-extension/camelot@tabcomputing.com/* "$dest/"
+    gnome-extensions enable camelot@tabcomputing.com 2>/dev/null || \
+      gsettings set org.gnome.shell enabled-extensions \
+        "$(gsettings get org.gnome.shell enabled-extensions | python3 -c 'import ast,sys; v=sys.stdin.read().strip(); l=[] if v.startswith("@") else ast.literal_eval(v); l.append("camelot@tabcomputing.com") if "camelot@tabcomputing.com" not in l else None; print(l)')"
+    echo "installed to $dest — log out and back in to load it (Wayland loads new extensions only at login)"
+
+extension-uninstall:
+    gnome-extensions disable camelot@tabcomputing.com 2>/dev/null || true
+    rm -rf "$HOME/.local/share/gnome-shell/extensions/camelot@tabcomputing.com"
+
 # ---- release ---------------------------------------------------------------
 
 # Bump the version everywhere: shard.yml and src/camelot/version.cr (the

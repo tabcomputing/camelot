@@ -52,7 +52,8 @@ module Camelot
         else
           # A running daemon answers with warm caches and can answer
           # `recent`/`status`; otherwise run here.
-          if answer = Client.call(result.subcommand.not_nil!, result.data)
+          name = result.subcommand.not_nil!
+          if !Commands::LOCAL_ONLY.includes?(name) && (answer = Client.call(name, result.data))
             output, is_error = answer
             raise Error.new(output) if is_error
             STDOUT.print output
@@ -66,7 +67,7 @@ module Camelot
     rescue ex : Error
       STDERR.puts "camelot: #{ex.message}"
       exit 1
-    rescue ex : A11y::Error | Config::Error | Capture::Error
+    rescue ex : A11y::Error | Config::Error | Capture::Error | Shell::Error
       STDERR.puts "camelot: #{ex.message}"
       exit 2
     rescue ex : IO::Error
@@ -87,6 +88,7 @@ module Camelot
       when "focus"   then cmd_focus
       when "at"      then cmd_at
       when "context" then cmd_context
+      when "pointer" then cmd_pointer
       when "watch"   then cmd_watch
       else                fail("unknown command: #{@result.subcommand}")
       end
@@ -153,7 +155,10 @@ module Camelot
       x = int?("x") || fail("x required")
       y = int?("y") || fail("y required")
       acc = if bool?("screen")
-              A11y.at_screen_point(x, y)
+              # Screen coordinates mean something only to the compositor on
+              # Wayland; ask it when the extension is there (X11 apps answer
+              # for themselves otherwise).
+              Shell.available? ? Shell.resolve(x, y).widget : A11y.at_screen_point(x, y)
             else
               win = if q = str?("app")
                       app = application(q)
@@ -181,6 +186,37 @@ module Camelot
         fail("refusing to write an image to the terminal; use -o FILE or pipe it")
       else
         @out.write(image.bytes)
+      end
+    end
+
+    record PointerReport, pointer : Shell::Point, application : String?, window : Shell::Hit?,
+      widget : A11y::Node? do
+      include JSON::Serializable
+      include YAML::Serializable
+    end
+
+    private def cmd_pointer
+      if (wait = int?("delay")) && wait > 0
+        sleep wait.seconds
+      end
+      r = Shell.resolve_pointer
+      app = r.widget.try { |w| A11y.application?(w) }.try { |a| A11y.safe(nil) { a.name } }
+      node = r.widget.try { |w| A11y.snapshot(w, snapshot_options(depth: 0)) }
+      if @format == "text"
+        @out.puts "pointer: #{r.point.x},#{r.point.y}"
+        if hit = r.window
+          f = hit.frame
+          @out.puts "window: #{app || "pid #{hit.pid}"} #{hit.title.inspect} at #{f.x},#{f.y} #{f.width}x#{f.height} " \
+                    "(pointer at #{hit.frame_point.x},#{hit.frame_point.y} inside)"
+        else
+          @out.puts "window: (none: the desktop or the shell)"
+        end
+        @out.puts "under: #{node ? Format.line(node) : "(nothing the application will name)"}"
+        if t = node.try(&.text)
+          @out.puts "  text: #{t.content.lines.first?.try(&.strip)}"
+        end
+      else
+        Format.emit(@out, PointerReport.new(r.point, app, r.window, node), @format)
       end
     end
 

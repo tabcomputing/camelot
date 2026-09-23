@@ -1,0 +1,8 @@
+{
+  "uuid": "camelot@tabcomputing.com",
+  "name": "Camelot",
+  "description": "Tells camelot where windows and the pointer are, so it can name the widget under your cursor. Only camelot's own programs may ask.",
+  "shell-version": ["45", "46", "47", "48", "49", "50"],
+  "url": "https://github.com/tabcomputing/camelot",
+  "version-name": "0.1"
+}

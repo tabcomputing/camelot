@@ -166,6 +166,17 @@ name: reload
 description: Make the daemon re-read its config file
 properties: {}
 ---
+name: pointer
+description: "What is under the mouse pointer: the window and the widget (on Wayland, needs the camelot GNOME Shell extension)"
+allOf:
+  - {$ref: output}
+  - {$ref: snapshot}
+  - properties:
+      delay:
+        type: integer
+        default: 0
+        description: Wait this many seconds first, to put the pointer somewhere
+---
 name: shot
 description: Capture the screen through the desktop portal (the desktop announces it; nothing is recorded)
 properties:

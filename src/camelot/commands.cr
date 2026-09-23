@@ -11,7 +11,7 @@ module Camelot
     # Commands that only the daemon can answer.
     DAEMON_ONLY = %w[recent status pause resume reload subscribe]
     # Commands that are never forwarded to the daemon.
-    LOCAL_ONLY = %w[mcp watch daemon shot]
+    LOCAL_ONLY = %w[mcp watch daemon shot pointer]
     # User controls over the daemon: not offered to an AI as tools.
     CONTROL = %w[pause resume reload subscribe]
     # Not offered as MCP tools: the server itself, the daemon, the
@@ -34,7 +34,7 @@ module Camelot
       buffer = IO::Memory.new
       CLI.new(result, buffer).dispatch
       {buffer.to_s, false}
-    rescue ex : CLI::Error | A11y::Error | Config::Error | Capture::Error
+    rescue ex : CLI::Error | A11y::Error | Config::Error | Capture::Error | Shell::Error
       {ex.message || ex.class.name, true}
     end
   end
