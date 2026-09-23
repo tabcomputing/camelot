@@ -251,9 +251,11 @@ module Camelot
             STDERR.puts "pick: capturing" if debug
             Shelf.put(Capture.shot(interactive: !ENV["CAMELOT_PICK_NONINTERACTIVE"]?), "pick")
             STDERR.puts "pick: shelved" if debug
+          rescue Capture::Cancelled
+            # you closed the picker: nothing to report
           rescue ex : Capture::Error
             STDERR.puts "pick: capture failed: #{ex.message}" if debug
-            failure = ex.message.to_s unless ex.message.to_s.includes?("declined") # a cancel, not an error
+            failure = ex.message.to_s
           ensure
             MainLoop.invoke do
               STDERR.puts "pick: presenting" if debug
