@@ -11,6 +11,10 @@ Type=simple
 ExecStart=/usr/bin/camelot daemon
 Restart=on-failure
 RestartSec=2
+# The daemon sees your screen, so it must not be able to reach the network:
+# it speaks only over Unix sockets (AT-SPI, D-Bus, its own socket). The
+# kernel refuses to create any other kind of socket for it.
+RestrictAddressFamilies=AF_UNIX
 
 [Install]
 WantedBy=graphical-session.target

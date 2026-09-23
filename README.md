@@ -318,6 +318,12 @@ Password fields (AT-SPI role `password text`) are reported with
 and keystrokes into them never enter the event stream or the daemon's
 history. Applications on the ignore list are redacted the same way.
 
+**The daemon cannot reach the network.** Its systemd unit sets
+`RestrictAddressFamilies=AF_UNIX`, so the kernel refuses to create an
+internet socket for it at all: it talks to AT-SPI, D-Bus and its own socket,
+nothing else. What it sees leaves your machine only through the MCP tools,
+to an agent you chose, under the switchboard's settings.
+
 **What the daemon holds.** Its history is in memory only: at most
 `history` events, none older than `retention` (30 minutes by default),
 readable only through a socket private to your user, gone when it stops.

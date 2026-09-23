@@ -202,6 +202,21 @@ during which libatspi services its own connection; events that arrive
 meanwhile are queued and dispatched on the pump's next turn. Nothing shares
 state across threads.
 
+## No network, by construction
+
+Reading the screen is not the danger; what happens to it afterwards is. The
+daemon — the part that is always watching — therefore cannot open a network
+socket: the unit sets `RestrictAddressFamilies=AF_UNIX`, enforced by a
+seccomp filter, so `socket(AF_INET, ...)` fails before any connection is
+attempted. Everything it needs is a Unix socket: the AT-SPI bus, the session
+bus, and its own control socket.
+
+That leaves exactly one way out: the MCP server, which runs in the agent's
+process tree, not the daemon's, and hands over what a tool call asks for. It
+is the release point, and the switchboard is its policy — `pause`, the ignore
+list, `text: false` and `screenshots: false` all apply before anything
+reaches it.
+
 ## Running it
 
 ```sh
