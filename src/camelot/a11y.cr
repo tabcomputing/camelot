@@ -425,8 +425,12 @@ module Camelot
       Atspi.raise_gerror(error) unless error.null?
       return [] of Atspi::Accessible if garray.null?
       arr = garray.as(Pointer(LibGLib::Array)).value
+      # Not every toolkit's Collection implementation is sound: gnome-shell
+      # answers with a length that is not a length. Anything past what we
+      # asked for is nonsense, and the caller falls back to walking.
+      length = arr.data.null? ? 0_i64 : arr.len.to_i64.clamp(0_i64, count.to_i64)
       items = arr.data.as(Pointer(Pointer(Void)))
-      result = (0...arr.len).map { |i| Atspi::Accessible.new(items[i], GICrystal::Transfer::Full) }
+      result = (0...length).map { |i| Atspi::Accessible.new(items[i], GICrystal::Transfer::Full) }
       LibGLibArray.g_array_free(garray.as(Void*), 0)
       result
     end

@@ -236,6 +236,11 @@ module Camelot
       end
     rescue IO::Error
       # client went away
+    rescue ex
+      # One malformed desktop must not take the service down with it: an
+      # exception escaping a fiber ends the process.
+      @log.puts "camelot daemon: #{ex.inspect_with_backtrace}"
+      client.puts({"ok" => false, "error" => "camelot: #{ex.message}"}.to_json) rescue nil
     ensure
       client.close rescue nil
     end
