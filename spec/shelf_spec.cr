@@ -36,3 +36,11 @@ describe Camelot::Shelf do
     end
   end
 end
+
+describe Camelot::Capture do
+  it "decodes the file URIs the portal answers with" do
+    Camelot::Capture.path_from_uri("file:///home/me/Pictures/Screenshot.png").should eq "/home/me/Pictures/Screenshot.png"
+    Camelot::Capture.path_from_uri("file:///home/me/Pictures/Screenshots/Screenshot%20From%202026-09-23%2001-48-24.png")
+      .should eq "/home/me/Pictures/Screenshots/Screenshot From 2026-09-23 01-48-24.png"
+  end
+end

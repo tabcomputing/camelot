@@ -16,6 +16,9 @@ module Camelot
   module Capture
     class Error < Exception; end
 
+    # The user closed the picker: not a failure worth reporting.
+    class Cancelled < Error; end
+
     PORTAL      = "org.freedesktop.portal.Desktop"
     PORTAL_PATH = "/org/freedesktop/portal/desktop"
     SCREENSHOT  = "org.freedesktop.portal.Screenshot"
@@ -72,10 +75,10 @@ module Camelot
       sender = conn.unique_name.not_nil!.lchop(':').tr(".", "_")
       handle = "/org/freedesktop/portal/desktop/request/#{sender}/#{token}"
 
-      answer = Channel(String?).new(1)
+      answer = Channel(String | Int32).new(1)
       # Subscribed through C: the generated wrapper mishandles the nullable
       # string arguments this call needs.
-      handler = ->(params : Pointer(Void)) { answer.send(uri_from(params)); nil }
+      handler = ->(params : Pointer(Void)) { answer.send(response(params)); nil }
       box = Box.box(handler)
       trampoline = ->(_conn : Void*, _sender : Pointer(LibC::Char), _path : Pointer(LibC::Char), _iface : Pointer(LibC::Char), _signal : Pointer(LibC::Char), params : Void*, data : Void*) do
         Box(Proc(Pointer(Void), Nil)).unbox(data).call(params)
@@ -90,9 +93,15 @@ module Camelot
           GLib::Variant.parse(%(("", #{options}))), nil,
           Gio::DBusCallFlags::None, 10_000, nil)
 
-        uri = await(answer, timeout)
-        raise Error.new("the desktop declined the screenshot") unless uri
-        file = URI.parse(uri).path
+        result = await(answer, timeout)
+        case result
+        when 1 then raise Cancelled.new("the screenshot was cancelled")
+        when Int32
+          raise Error.new("the desktop refused the screenshot (portal response #{result}); " \
+                          "it may need permission for this application")
+        end
+        uri = result.as(String)
+        file = path_from_uri(uri)
         raise Error.new("the portal reported a screenshot at #{uri}, which is not there") unless File.exists?(file)
         file
       ensure
@@ -100,33 +109,40 @@ module Camelot
       end
     end
 
-    # The Response signal is (u code, a{sv} results); we want results["uri"]
-    # when the code is 0 (success).
-    private def self.uri_from(params : Pointer(Void)) : String?
+    # The local path a file:// URI names. Interactive screenshots are saved
+    # as "Screenshot From 2026-09-23 01-48-24.png", so the URI is
+    # percent-encoded and must be decoded, not just stripped of its scheme.
+    def self.path_from_uri(uri : String) : String
+      URI.decode(URI.parse(uri).path)
+    end
+
+    # The Response signal is (u code, a{sv} results): the URI on success,
+    # else the code — 1 means the user cancelled, 2 anything else.
+    private def self.response(params : Pointer(Void)) : String | Int32
       code = LibGLib.g_variant_get_uint32(LibGLib.g_variant_get_child_value(params, 0))
-      return nil unless code.zero?
+      return code.to_i32 unless code.zero?
       results = LibGLib.g_variant_get_child_value(params, 1)
       value = LibGLib.g_variant_lookup_value(results, "uri", Pointer(Void).null)
-      return nil if value.null?
+      return 2 if value.null?
       ptr = LibGLib.g_variant_get_string(value, Pointer(UInt64).null)
-      ptr.null? ? nil : String.new(ptr)
+      ptr.null? ? 2 : String.new(ptr)
     end
 
     # Wait for the portal, driving the GLib loop ourselves unless something
     # else in this process (the daemon, the panel) already is.
-    private def self.await(answer : Channel(String?), timeout : Time::Span) : String?
+    private def self.await(answer : Channel(String | Int32), timeout : Time::Span) : String | Int32
       if Events::Pump.running?
         select
-        when uri = answer.receive then uri
+        when r = answer.receive then r
         when timeout(timeout) then raise Error.new("the desktop did not answer within #{timeout.total_seconds.to_i}s")
         end
       else
         stop = Channel(Nil).new(1)
-        result = nil.as(String?)
+        result = 2.as(String | Int32) # no answer in time counts as a failure
         spawn(name: "camelot-shot") do
           select
-          when uri = answer.receive then result = uri
-          when timeout(timeout) then result = nil
+          when r = answer.receive then result = r
+          when timeout(timeout) then nil
           end
           stop.send(nil)
         end
