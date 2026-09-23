@@ -76,8 +76,9 @@ module Camelot
         @toasts.child = @nav
         @window.content = @toasts
 
-        @link.on_change = ->(what : Symbol) { changed(what) }
-        @link.on_event = ->(e : Events::Event) { fold(e) }
+        # The link calls these from its own fiber; GTK is touched on the loop's turn.
+        @link.on_change = ->(what : Symbol) { MainLoop.invoke { changed(what) }; nil }
+        @link.on_event = ->(e : Events::Event) { MainLoop.invoke { fold(e) }; nil }
         refresh_state
         rebuild_activity
         rebuild_ignore
@@ -234,24 +235,36 @@ module Camelot
         # Wayland will not let a window raise itself later on its own say-so;
         # it needs an activation token, and only an app with focus and a
         # fresh click can get one. So take it now and spend it after.
+        debug = ENV["CAMELOT_DEBUG"]?
+        STDERR.puts "pick: requesting activation token" if debug
         token = begin
           @window.display.app_launch_context.startup_notify_id(nil, nil)
         rescue
           nil
         end
+        STDERR.puts "pick: token #{token.inspect}" if debug
         spawn(name: "camelot-gtk-pick") do
+          failure = nil.as(String?)
           begin
-            @window.minimize
-            sleep 400.milliseconds
-            Shelf.put(Capture.shot(interactive: true), "pick")
+            MainLoop.invoke { @window.minimize }
+            sleep 400.milliseconds # let the panel get out of the way
+            STDERR.puts "pick: capturing" if debug
+            Shelf.put(Capture.shot(interactive: !ENV["CAMELOT_PICK_NONINTERACTIVE"]?), "pick")
+            STDERR.puts "pick: shelved" if debug
           rescue ex : Capture::Error
-            toast(ex.message.to_s) unless ex.message.to_s.includes?("declined") # a cancel, not an error
+            STDERR.puts "pick: capture failed: #{ex.message}" if debug
+            failure = ex.message.to_s unless ex.message.to_s.includes?("declined") # a cancel, not an error
           ensure
-            @window.startup_id = token if token
-            @window.present
-            @picking = false
-            @pick_button.sensitive = true
-            refresh_shelf
+            MainLoop.invoke do
+              STDERR.puts "pick: presenting" if debug
+              @window.startup_id = token if token
+              @window.present
+              STDERR.puts "pick: presented" if debug
+              @picking = false
+              @pick_button.sensitive = true
+              refresh_shelf
+              failure.try { |m| toast(m) }
+            end
           end
         end
       end

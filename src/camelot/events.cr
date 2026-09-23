@@ -147,49 +147,69 @@ module Camelot
       end
 
       # Run until `stop` yields, or `deadline` passes.
+      #
+      # Every cycle is GLib's whole cycle — prepare, query, wait, poll,
+      # check, dispatch — and a prepare is never left unanswered by a check.
+      # Sources may claim resources in prepare and release them in check:
+      # GDK's Wayland source takes a read intent on the display socket, and
+      # with no check to release it the next synchronous round trip (a
+      # present() with an activation token, a clipboard read) waits on its
+      # own thread forever.
       def run(deadline : Time::Instant? = nil, stop : Channel(Nil) = Channel(Nil).new) : Nil
         raise Error.new("GLib main context is owned by another thread") if LibGLib.g_main_context_acquire(@context).zero?
         Pump.running = true
         fds = Slice(LibGLib::PollFD).new(MAX_FDS, LibGLib::PollFD.new)
-        idle = 0
+        busy = 0 # consecutive cycles with work ready at once
+        idle = 0 # consecutive cycles where "ready now" produced nothing
         loop do
           break if deadline && Time.instant >= deadline
           break if stopped?(stop)
 
-          # Dispatch what is ready, but never unboundedly.
-          dispatched = 0
-          while dispatched < MAX_DISPATCH && LibGLib.g_main_context_iteration(@context, 0) != 0
-            dispatched += 1
-          end
-          if dispatched >= MAX_DISPATCH
-            sleep BREATH # GLib still has work; come back after a breath
-            next
-          end
-          idle = dispatched > 0 ? 0 : idle + 1
-
-          # Ask GLib what it would poll, and wait for that in Crystal.
           priority = 0
           LibGLib.g_main_context_prepare(@context, pointerof(priority))
           timeout_ms = -1
           count = LibGLib.g_main_context_query(@context, priority, pointerof(timeout_ms),
             fds.to_unsafe.as(Pointer(Pointer(LibGLib::PollFD))), fds.size)
-          raise Error.new("GLib wants #{count} fds, more than #{MAX_FDS}") if count > fds.size
-          rewatch(fds[0, count])
+          if count > fds.size
+            LibGLib.g_main_context_check(@context, priority, fds.to_unsafe, 0) # answer the prepare
+            raise Error.new("GLib wants #{count} fds, more than #{MAX_FDS}")
+          end
+          polled = fds[0, count]
+          rewatch(polled)
+
+          # Wait in Crystal for what GLib would have polled.
+          stopping = false
+          if timeout_ms != 0
+            wait = timeout_ms < 0 ? nil : timeout_ms.milliseconds
+            if deadline
+              left = deadline - Time.instant
+              wait = left if wait.nil? || left < wait
+            end
+            stopping = await(wait, stop) == :stop
+          end
+
+          # Which fds are ready, exactly, without blocking; then check and
+          # dispatch, as GLib's own loop does.
+          LibGLib.g_poll(polled.to_unsafe.as(Void*), count.to_u32, 0) if count > 0
+          ready = LibGLib.g_main_context_check(@context, priority, polled.to_unsafe, count) != 0
+          LibGLib.g_main_context_dispatch(@context)
+          break if stopping
 
           if timeout_ms == 0
-            # A source says it is ready now, yet dispatching it did
-            # nothing: breathe rather than spin.
-            sleep(idle > IDLE_TOLERANCE ? IDLE_BACKOFF : BREATH)
-            next
+            # Work was ready without waiting. Go straight round, but give
+            # the rest of the process a turn now and then — and slow down
+            # if the "ready" keeps producing nothing.
+            idle = ready ? 0 : idle + 1
+            busy += 1
+            if idle > IDLE_TOLERANCE
+              sleep IDLE_BACKOFF
+            elsif busy >= MAX_DISPATCH
+              busy = 0
+              sleep BREATH
+            end
+          else
+            busy = idle = 0
           end
-
-          wait = timeout_ms < 0 ? nil : timeout_ms.milliseconds
-          if deadline
-            left = deadline - Time.instant
-            wait = left if wait.nil? || left < wait
-          end
-          wait = IDLE_BACKOFF if wait.nil? && idle > IDLE_TOLERANCE
-          break if await(wait, stop) == :stop
         end
       ensure
         Pump.running = false
@@ -326,7 +346,7 @@ module Camelot
       # false nothing is looked up, which is what "paused" should cost.
       property gate : Proc(Bool) = -> { true }
 
-      def initialize(types : Array(String) = DEFAULT_TYPES, capacity : Int32 = 4096, &handler : Event ->)
+      def initialize(@types : Array(String) = DEFAULT_TYPES, capacity : Int32 = 4096, &handler : Event ->)
         @channel = Channel(Pending).new(capacity)
         @listener = Listener.new do |ev|
           p = Events.pending(ev)
@@ -336,13 +356,24 @@ module Camelot
             @dropped += 1
           end
         end
-        types.each { |t| @listener.register(t) }
+        subscribe
         spawn(name: "camelot-events") do
           while p = @channel.receive?
             next unless gate.call
             handler.call(p.resolve)
           end
         end
+      end
+
+      # Stop receiving events at all — the registry no longer sends them —
+      # and start again. Pausing this way costs nothing, where filtering
+      # would still pay for every event delivered.
+      def unsubscribe : Nil
+        @listener.deregister_all
+      end
+
+      def subscribe : Nil
+        @types.each { |t| @listener.register(t) }
       end
 
       def close : Nil

@@ -1,5 +1,6 @@
 require "./camelot"
 require "libadwaita"
+require "./camelot/gtk/main_loop"
 require "./camelot/gtk/link"
 require "./camelot/gtk/panel"
 

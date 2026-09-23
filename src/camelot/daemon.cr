@@ -22,6 +22,7 @@ module Camelot
       @stop = Channel(Nil).new(1) # buffered: the signal handler must not block
       @sink = nil.as(Sink?)
       @subscribers = [] of Subscriber
+      @queue = nil.as(Events::Queue?)
     end
 
     def run : Nil
@@ -29,7 +30,7 @@ module Camelot
       server = listen
       apply_config(first: true)
 
-      queue = Events::Queue.new { |event| record(event) }
+      queue = @queue = Events::Queue.new { |event| record(event) }
       queue.gate = -> { !paused? } # paused costs nothing, not even a lookup
 
       Process.on_terminate do
@@ -304,6 +305,7 @@ module Camelot
         return {"already paused since #{p.to_s("%H:%M:%S")}\n", false}
       end
       @paused_since = Time.local
+      @queue.try &.unsubscribe
       @log.puts "camelot daemon: recording paused"
       broadcast_state
       {"recording paused\n", false}
@@ -312,6 +314,7 @@ module Camelot
     private def resume : {String, Bool}
       return {"not paused\n", false} unless paused?
       @paused_since = nil
+      @queue.try &.subscribe
       @log.puts "camelot daemon: recording resumed"
       broadcast_state
       {"recording resumed\n", false}
