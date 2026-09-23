@@ -231,6 +231,14 @@ module Camelot
         return if @picking
         @picking = true
         @pick_button.sensitive = false
+        # Wayland will not let a window raise itself later on its own say-so;
+        # it needs an activation token, and only an app with focus and a
+        # fresh click can get one. So take it now and spend it after.
+        token = begin
+          @window.display.app_launch_context.startup_notify_id(nil, nil)
+        rescue
+          nil
+        end
         spawn(name: "camelot-gtk-pick") do
           begin
             @window.minimize
@@ -239,6 +247,7 @@ module Camelot
           rescue ex : Capture::Error
             toast(ex.message.to_s) unless ex.message.to_s.includes?("declined") # a cancel, not an error
           ensure
+            @window.startup_id = token if token
             @window.present
             @picking = false
             @pick_button.sensitive = true
@@ -286,10 +295,15 @@ module Camelot
       # only takes text.
       private def drag_content(item : Shelf::Item) : Gdk::ContentProvider
         uri = "file://#{item.path}\r\n"
-        Gdk::ContentProvider.new_union([
+        members = [
           Gdk::ContentProvider.new_for_bytes("text/uri-list", GLib::Bytes.new(uri.to_unsafe, uri.bytesize)),
           Gdk::ContentProvider.new_for_bytes("text/plain;charset=utf-8", GLib::Bytes.new(item.path.to_unsafe, item.path.bytesize)),
-        ])
+        ]
+        # new_union takes ownership of its members, but the generated binding
+        # passes them without a reference of their own; when our wrappers are
+        # collected the union is left holding freed objects. Give it its own.
+        members.each { |m| LibGObject.g_object_ref(m.to_unsafe) }
+        Gdk::ContentProvider.new_union(members)
       end
 
       # The shelf changes from the command line too (`camelot shot --pick
