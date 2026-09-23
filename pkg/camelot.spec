@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 
 Name:           camelot
-Version:        0.3.1
+Version:        0.4.0
 Release:        1%{?dist}
 Summary:        Context bridge between the Linux desktop and AI
 
@@ -77,6 +77,9 @@ install -Dpm0644 LICENSE %{buildroot}%{_licensedir}/%{name}/LICENSE
 %{_datadir}/applications/com.tabcomputing.Camelot.desktop
 
 %changelog
+* Tue Sep 22 2026 Thomas Sawyer <transfire@gmail.com> - 0.4.0-1
+- Screen capture through the desktop portal (camelot shot), exposed as an MCP image tool; fix a daemon crash when the shell has focus
+
 * Tue Sep 22 2026 Thomas Sawyer <transfire@gmail.com> - 0.3.1-1
 - Fix a daemon that spun a core when left running: the GLib pump now always yields, bounds dispatch, and retires watchers for dead connections
 

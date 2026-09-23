@@ -1,3 +1,9 @@
+camelot (0.4.0-1) unstable; urgency=medium
+
+  * Screen capture through the desktop portal (camelot shot), exposed as an MCP image tool; fix a daemon crash when the shell has focus
+
+ -- Thomas Sawyer <transfire@gmail.com>  Tue, 22 Sep 2026 21:22:04 -0400
+
 camelot (0.3.1-1) unstable; urgency=medium
 
   * Fix a daemon that spun a core when left running: the GLib pump now always yields, bounds dispatch, and retires watchers for dead connections
